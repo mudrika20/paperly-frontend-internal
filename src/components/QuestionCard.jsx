@@ -8,11 +8,19 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
   const [options, setOptions] = useState(
     Array.isArray(data.options) ? data.options : []
   );
-  const [diagramImage, setDiagramImage] = useState(data.diagram_image_base64 || "");
+  const [diagramImages, setDiagramImages] = useState(
+    Array.isArray(data.diagram_images_base64)
+      ? data.diagram_images_base64
+      : (data.diagram_image_base64 ? [data.diagram_image_base64] : [])
+  );
 
   useEffect(() => {
-    setDiagramImage(data.diagram_image_base64 || "");
-  }, [data.diagram_image_base64]);
+    setDiagramImages(
+      Array.isArray(data.diagram_images_base64)
+        ? data.diagram_images_base64
+        : (data.diagram_image_base64 ? [data.diagram_image_base64] : [])
+    );
+  }, [data.diagram_images_base64, data.diagram_image_base64]);
 
   useEffect(() => {
     setLatex(data.latex || "");
@@ -52,10 +60,13 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
       ? [...options, "", "", "", ""].slice(0, 4)
       : options;
 
-  const setDiagramFromDataUrl = (nextDataUrl) => {
+  const appendDiagramFromDataUrl = (nextDataUrl) => {
     if (!nextDataUrl) return;
-    setDiagramImage(nextDataUrl);
-    onChange({ diagram_image_base64: nextDataUrl });
+    setDiagramImages((prev) => {
+      const next = [...prev, nextDataUrl];
+      onChange({ diagram_images_base64: next });
+      return next;
+    });
   };
 
   const fileToDataUrl = (file) =>
@@ -70,7 +81,7 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
     if (!file || !file.type.startsWith("image/")) return;
     try {
       const dataUrl = await fileToDataUrl(file);
-      setDiagramFromDataUrl(dataUrl);
+      appendDiagramFromDataUrl(dataUrl);
     } catch (error) {
       console.error("Failed to process diagram image:", error);
     }
@@ -84,9 +95,12 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
     await handleDiagramFile(pastedImage);
   };
 
-  const handleRemoveDiagram = () => {
-    setDiagramImage("");
-    onChange({ diagram_image_base64: "" });
+  const handleRemoveDiagram = (indexToRemove) => {
+    setDiagramImages((prev) => {
+      const next = prev.filter((_, index) => index !== indexToRemove);
+      onChange({ diagram_images_base64: next });
+      return next;
+    });
   };
 
   return (
@@ -125,22 +139,22 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
               <p className="text-xs text-slate-500">
                 💡 Tip: Snip from PDF and press Ctrl+V anywhere on this card to attach diagram.
               </p>
-              {diagramImage ? (
-                <div className="relative">
+              {diagramImages.map((diagramImage, index) => (
+                <div key={`diagram-mcq-${index}`} className="relative">
                   <img
                     src={diagramImage}
-                    alt="Attached diagram preview"
+                    alt={`Attached diagram preview ${index + 1}`}
                     className="max-h-44 w-full rounded-lg border border-slate-200 object-contain bg-white p-2"
                   />
                   <button
                     type="button"
-                    onClick={handleRemoveDiagram}
-                    className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-1 text-xs font-semibold text-slate-700 shadow hover:bg-white"
+                    onClick={() => handleRemoveDiagram(index)}
+                    className="absolute right-2 top-2 rounded-full bg-red-600 px-2 py-1 text-xs font-semibold text-white shadow hover:bg-red-700"
                   >
                     X
                   </button>
                 </div>
-              ) : null}
+              ))}
               <MathPreview latex={question} />
             </div>
           </div>
@@ -184,22 +198,22 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
             <p className="text-xs text-slate-500">
               💡 Tip: Snip from PDF and press Ctrl+V anywhere on this card to attach diagram.
             </p>
-            {diagramImage ? (
-              <div className="relative">
+            {diagramImages.map((diagramImage, index) => (
+              <div key={`diagram-subjective-${index}`} className="relative">
                 <img
                   src={diagramImage}
-                  alt="Attached diagram preview"
+                  alt={`Attached diagram preview ${index + 1}`}
                   className="max-h-44 w-full rounded-lg border border-slate-200 object-contain bg-white p-2"
                 />
                 <button
                   type="button"
-                  onClick={handleRemoveDiagram}
-                  className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-1 text-xs font-semibold text-slate-700 shadow hover:bg-white"
+                  onClick={() => handleRemoveDiagram(index)}
+                  className="absolute right-2 top-2 rounded-full bg-red-600 px-2 py-1 text-xs font-semibold text-white shadow hover:bg-red-700"
                 >
                   X
                 </button>
               </div>
-            ) : null}
+            ))}
             <div className="whitespace-pre-wrap">
               <MathPreview latex={question} />
             </div>

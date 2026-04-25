@@ -164,6 +164,10 @@ const Dashboard = () => {
 
       const normalizedQuestions = questions.map((question) => ({
         ...question,
+        diagram_images_base64: Array.isArray(question.diagram_images_base64)
+          ? question.diagram_images_base64
+          : (question.diagram_image_base64 ? [question.diagram_image_base64] : []),
+        diagram_image_base64: undefined,
         board,
         subject_code: code || question.subject_code || "",
         tier_level: tier,
