@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Trash2 } from "lucide-react";
 import MathPreview from "./MathPreview";
 
@@ -43,11 +43,16 @@ const MSEntryRow = ({ entry, index, onChange }) => {
   // ── Diagram state (two-bucket, same pattern as QuestionCard) ─────────────
   // aiDiagrams  : from Gemini extraction — resets only on mount
   // userDiagrams: manually pasted — NEVER reset
-  const [aiDiagrams, setAiDiagrams] = useState(() =>
-    Array.isArray(entry.diagram_urls)
-      ? entry.diagram_urls.filter(u => u && u !== "[NEEDS_CROP]")
-      : []
-  );
+  const [aiDiagrams, setAiDiagrams] = useState([]);
+
+  useEffect(() => {
+    setAiDiagrams(
+      Array.isArray(entry.diagram_urls)
+        ? entry.diagram_urls.filter(u => u && u !== "[NEEDS_CROP]")
+        : []
+    );
+  }, [entry.diagram_urls]);
+
   const [userDiagrams, setUserDiagrams] = useState([]);
 
   const notifyDiagramChange = (nextAi, nextUser) => {
