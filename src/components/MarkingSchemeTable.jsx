@@ -1,6 +1,21 @@
 import React, { useState } from "react";
 import MathPreview from "./MathPreview";
 
+  const parseDiagrams = (raw) => {
+    if (!raw) return [];
+    let arr = [];
+    if (Array.isArray(raw)) arr = raw;
+    else if (typeof raw === "string") {
+      try { const parsed = JSON.parse(raw); arr = Array.isArray(parsed) ? parsed : [parsed]; } catch (e) { arr = [raw]; }
+    } else if (typeof raw === "object") arr = [raw];
+    
+    return [...new Set(arr.flat(Infinity).map(u => {
+      if (typeof u === "string") return u;
+      if (u && typeof u === "object") return u.secure_url || u.url || u.diagramUrl || "";
+      return "";
+    }).filter(u => typeof u === "string" && u.trim() !== "" && u !== "[NEEDS_CROP]"))];
+  };
+
 // ---------------------------------------------------------------------------
 // DiagramGallery
 // Renders all Cloudinary (or any valid HTTP/data-URI) URLs from diagram_urls.
@@ -10,16 +25,8 @@ const DiagramGallery = ({ urls = [] }) => {
   const [errored, setErrored]   = useState({});   // tracks broken images by index
   const [zoomed,  setZoomed]    = useState(null);  // index of the zoomed image
 
-  // Normalise: guarantee we always work with a flat array of non-empty strings
-  const validUrls = Array.isArray(urls)
-    ? urls.filter(
-        (u) =>
-          typeof u === "string" &&
-          u.trim() !== "" &&
-          u !== "[NEEDS_CROP]" &&
-          (u.startsWith("http") || u.startsWith("data:image"))
-      )
-    : [];
+   // Normalise: guarantee we always work with a flat array of non-empty strings
+   const validUrls = parseDiagrams(urls);
 
   if (validUrls.length === 0) return null;
 
@@ -143,19 +150,10 @@ const MarkingSchemeTable = ({ data = [], onSave, saving = false, disabled = fals
                   row.latex                         ||
                   "(No answer content)";
 
-                // ── Resolve diagram_urls ────────────────────────────────────
-                // Normalise to a clean flat array regardless of shape returned
-                // by the API (flat array, nested array, or absent).
-                const rawUrls = row.diagram_urls;
-                const diagramUrls = Array.isArray(rawUrls)
-                  ? rawUrls.flat(Infinity).filter(
-                      (u) =>
-                        typeof u === "string" &&
-                        u.trim() !== "" &&
-                        u !== "[NEEDS_CROP]" &&
-                        (u.startsWith("http") || u.startsWith("data:image"))
-                    )
-                  : [];
+                 // ── Resolve diagram_urls ────────────────────────────────────
+                 // Normalise to a clean flat array regardless of shape returned
+                 // by the API (flat array, nested array, or absent).
+                 const diagramUrls = parseDiagrams(row.diagram_urls);
 
                 console.log(`[MarkingSchemeTable] Row ${index}:`, {
                   questionNumber,

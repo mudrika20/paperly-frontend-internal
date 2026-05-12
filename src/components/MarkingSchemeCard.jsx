@@ -2,6 +2,21 @@ import React, { useState, useEffect, useRef } from "react";
 import { Trash2 } from "lucide-react";
 import MathPreview from "./MathPreview";
 
+  const parseDiagrams = (raw) => {
+    if (!raw) return [];
+    let arr = [];
+    if (Array.isArray(raw)) arr = raw;
+    else if (typeof raw === "string") {
+      try { const parsed = JSON.parse(raw); arr = Array.isArray(parsed) ? parsed : [parsed]; } catch (e) { arr = [raw]; }
+    } else if (typeof raw === "object") arr = [raw];
+    
+    return [...new Set(arr.flat(Infinity).map(u => {
+      if (typeof u === "string") return u;
+      if (u && typeof u === "object") return u.secure_url || u.url || u.diagramUrl || "";
+      return "";
+    }).filter(u => typeof u === "string" && u.trim() !== "" && u !== "[NEEDS_CROP]"))];
+  };
+
 // ---------------------------------------------------------------------------
 // MethodStepsList
 // ---------------------------------------------------------------------------
@@ -42,8 +57,7 @@ const MSEntryRow = ({ entry, index, onChange }) => {
 
   const pastedSetRef = useRef(new Set());
 
-  const rawUrls = Array.isArray(entry.diagram_urls) ? entry.diagram_urls : [];
-  const currentDiagrams = [...new Set(rawUrls.flat(Infinity).filter(u => typeof u === 'string' && u.trim() !== '' && u !== '[NEEDS_CROP]'))];
+  const currentDiagrams = parseDiagrams(entry.diagram_urls);
 
   const appendUserDiagram = (dataUrl) => {
     if (!dataUrl) return;

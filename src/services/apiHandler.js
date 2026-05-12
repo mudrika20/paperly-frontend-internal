@@ -1,45 +1,29 @@
 import axios from "axios";
 
 // Sanitizes diagram URLs to ensure they are a flat array of valid strings
-function sanitizeDiagramUrls(diagramUrls) {
-  // Return empty array if null/undefined
-  if (!diagramUrls) return [];
-  
-  // Handle single string value
-  if (typeof diagramUrls === 'string') {
-    // If it's JSON-like, try to parse it
-    if (diagramUrls.trim().startsWith('[') && diagramUrls.trim().endsWith(']')) {
-      try {
-        const parsed = JSON.parse(diagramUrls);
-        return sanitizeDiagramUrls(parsed); // Recursive call with parsed value
-      } catch (e) {
-        // If parsing fails, treat as a simple string
-        return diagramUrls.trim() ? [diagramUrls.trim()] : [];
-      }
-    }
-    return diagramUrls.trim() ? [diagramUrls.trim()] : [];
-  }
-  
-  // Not an array, return empty array
-  if (!Array.isArray(diagramUrls)) return [];
-  
-  // Recursively flatten nested arrays and filter out invalid values
-  const flattenDeep = (arr) => {
-    return arr.reduce((acc, val) => 
-      Array.isArray(val) 
-        ? acc.concat(flattenDeep(val)) 
-        : acc.concat(typeof val === 'string' && val.trim() !== '' ? val : []), 
-      []
-    );
-  };
-
-  const flatUrls = flattenDeep(diagramUrls);
-  
-  // Filter out any non-strings, empty strings, or null/undefined
-  return flatUrls.filter(url => {
-    return typeof url === 'string' && url.trim() !== '';
-  });
-}
+const sanitizeDiagramUrls = (raw) => {
+    if (!raw) return [];
+    const flattened = [];
+    const processItem = (item) => {
+        if (item === null || item === undefined) return;
+        if (Array.isArray(item)) {
+            item.forEach(processItem);
+        } else if (typeof item === "object") {
+            const url = item.secure_url || item.url || item.diagramUrl;
+            if (url) processItem(url);
+        } else if (typeof item === "string") {
+            const trimmed = item.trim();
+            if ((trimmed.startsWith("[") && trimmed.endsWith("]")) || (trimmed.startsWith("{") && trimmed.endsWith("}"))) {
+                try { return processItem(JSON.parse(trimmed)); } catch(e) {}
+            }
+            if (trimmed && (trimmed.startsWith("http") || trimmed.startsWith("data:image") || trimmed.startsWith("//") || trimmed.includes("cloudinary") || trimmed === "[NEEDS_CROP]")) {
+                flattened.push(trimmed);
+            }
+        }
+    };
+    processItem(raw);
+    return flattened;
+};
 
 const NODE_API_URL = import.meta.env.VITE_NODE_API_URL;
 const BASE_URL = `${(NODE_API_URL || "http://localhost:5000").replace(/\/+$/, "")}/api`;

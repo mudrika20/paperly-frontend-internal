@@ -1,6 +1,21 @@
 import React, { useEffect, useRef, useState } from "react";
 import MathPreview from "./MathPreview";
 
+  const parseDiagrams = (raw) => {
+    if (!raw) return [];
+    let arr = [];
+    if (Array.isArray(raw)) arr = raw;
+    else if (typeof raw === 'string') {
+      try { const parsed = JSON.parse(raw); arr = Array.isArray(parsed) ? parsed : [parsed]; } catch (e) { arr = [raw]; }
+    } else if (typeof raw === 'object') arr = [raw];
+    
+    return [...new Set(arr.flat(Infinity).map(u => {
+      if (typeof u === 'string') return u;
+      if (u && typeof u === 'object') return u.secure_url || u.url || u.diagramUrl || '';
+      return '';
+    }).filter(u => typeof u === 'string' && u.trim() !== '' && u !== '[NEEDS_CROP]'))];
+  };
+
 /**
  * Normalises a raw question object from the backend into a consistent shape.
  * Reads diagram_urls (backend field) as well as legacy diagram_images_base64.
@@ -62,9 +77,8 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
   const pastedSetRef = useRef(new Set());
 
   // Single Source of Truth: Derive from props, flatten deeply, and deduplicate
-  const rawUrls = Array.isArray(data.diagram_urls) ? data.diagram_urls : [];
   const legacyImages = Array.isArray(data.diagram_images_base64) ? data.diagram_images_base64 : (data.diagram_image_base64 ? [data.diagram_image_base64] : []);
-  const currentDiagrams = [...new Set([...rawUrls, ...legacyImages].flat(Infinity).filter(u => typeof u === 'string' && u.trim() !== '' && u !== '[NEEDS_CROP]'))];
+  const currentDiagrams = [...new Set([...parseDiagrams(data.diagram_urls), ...legacyImages])];
 
   const appendUserDiagram = (dataUrl) => {
     if (!dataUrl) return;
