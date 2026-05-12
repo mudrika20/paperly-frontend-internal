@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Trash2 } from "lucide-react";
 import MathPreview from "./MathPreview";
 
@@ -40,39 +40,20 @@ const MSEntryRow = ({ entry, index, onChange }) => {
   const cognitiveDemand    = entry.cognitive_demand    || "MEDIUM";
   const difficultyOverride = entry.difficulty_override || null;
 
-  // ── Diagram state (two-bucket, same pattern as QuestionCard) ─────────────
-  // aiDiagrams  : from Gemini extraction — resets only on mount
-  // userDiagrams: manually pasted — NEVER reset
-  const [aiDiagrams, setAiDiagrams] = useState([]);
+  const pastedSetRef = useRef(new Set());
 
-  useEffect(() => {
-    setAiDiagrams(
-      Array.isArray(entry.diagram_urls)
-        ? entry.diagram_urls.filter(u => u && u !== "[NEEDS_CROP]")
-        : []
-    );
-  }, [entry.diagram_urls]);
+  const rawUrls = Array.isArray(entry.diagram_urls) ? entry.diagram_urls : [];
+  const currentDiagrams = [...new Set(rawUrls.flat(Infinity).filter(u => typeof u === 'string' && u.trim() !== '' && u !== '[NEEDS_CROP]'))];
 
-  const [userDiagrams, setUserDiagrams] = useState([]);
-
-  const notifyDiagramChange = (nextAi, nextUser) => {
-    if (onChange) onChange({ ...entry, diagram_urls: [...nextAi, ...nextUser] });
+  const appendUserDiagram = (dataUrl) => {
+    if (!dataUrl) return;
+    pastedSetRef.current.add(dataUrl);
+    if (onChange) onChange({ ...entry, diagram_urls: [...currentDiagrams, dataUrl] });
   };
 
-  const removeAiDiagram = (idx) => {
-    setAiDiagrams(prev => {
-      const next = prev.filter((_, i) => i !== idx);
-      notifyDiagramChange(next, userDiagrams);
-      return next;
-    });
-  };
-
-  const removeUserDiagram = (idx) => {
-    setUserDiagrams(prev => {
-      const next = prev.filter((_, i) => i !== idx);
-      notifyDiagramChange(aiDiagrams, next);
-      return next;
-    });
+  const removeDiagram = (idx) => {
+    const next = currentDiagrams.filter((_, i) => i !== idx);
+    if (onChange) onChange({ ...entry, diagram_urls: next });
   };
 
   const fileToDataUrl = (file) =>
@@ -83,28 +64,20 @@ const MSEntryRow = ({ entry, index, onChange }) => {
       reader.readAsDataURL(file);
     });
 
-  const appendUserDiagram = (dataUrl) => {
-    if (!dataUrl) return;
-    setUserDiagrams(prev => {
-      const next = [...prev, dataUrl];
-      notifyDiagramChange(aiDiagrams, next);
-      return next;
-    });
-  };
 
   // Robust paste: .files first (drag-drop), then .items (Snipping Tool / macOS)
   const handlePaste = async (e) => {
     const files   = Array.from(e.clipboardData?.files || []);
     const imgFile = files.find(f => f.type.startsWith("image/"));
     if (imgFile) {
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();
       appendUserDiagram(await fileToDataUrl(imgFile));
       return;
     }
     const items   = Array.from(e.clipboardData?.items || []);
     const imgItem = items.find(i => i.kind === "file" && i.type.startsWith("image/"));
     if (imgItem) {
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();
       const file = imgItem.getAsFile();
       if (file) appendUserDiagram(await fileToDataUrl(file));
     }
@@ -150,8 +123,6 @@ const MSEntryRow = ({ entry, index, onChange }) => {
     cognitiveDemand === "HIGH" ? "bg-red-100 text-red-800"      :
                                   "bg-yellow-100 text-yellow-800";
 
-  const hasDiagrams = aiDiagrams.length > 0 || userDiagrams.length > 0;
-
   return (
     <tr
       className="align-top hover:bg-amber-50 transition-colors"
@@ -180,68 +151,45 @@ const MSEntryRow = ({ entry, index, onChange }) => {
 
       {/* ── Final Answer + Diagram Gallery ───────────────────────────── */}
       <td className="px-4 py-3 text-sm text-slate-700">
-
-        {/* AI-extracted MS diagrams */}
-        {aiDiagrams.length > 0 && (
+        {currentDiagrams.length > 0 && (
           <div className="mb-3">
             <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-              MS Diagram(s) — AI Extracted
+              MS Diagram(s)
             </p>
             <div className="flex flex-col gap-2">
-              {aiDiagrams.map((src, i) => (
-                <div key={`ai-${i}`} className="group relative">
-                  <img
-                    src={src}
-                    alt={`MS Diagram ${i + 1}`}
-                    className="max-h-44 w-full rounded-lg border border-slate-200 bg-white object-contain p-2"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeAiDiagram(i)}
-                    className="absolute right-2 top-2 rounded-md bg-red-500 p-1 text-white opacity-0 shadow transition group-hover:opacity-100 hover:bg-red-600"
-                    title="Remove AI diagram"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))}
+              {currentDiagrams.map((src, i) => {
+                const isPasted = pastedSetRef.current.has(src);
+                return (
+                  <div key={`diag-${i}`} className="group relative">
+                    <img
+                      src={src}
+                      alt={`MS Diagram ${i + 1}`}
+                      className={`max-h-44 w-full rounded-lg object-contain p-2 ${
+                        isPasted ? "border-2 border-indigo-400 bg-white" : "border border-slate-200 bg-white"
+                      }`}
+                    />
+                    {isPasted && (
+                      <span className="absolute left-2 top-2 rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-bold text-white shadow">
+                        Pasted
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); removeDiagram(i); }}
+                      className="absolute right-2 top-2 rounded-md bg-red-500 p-1 text-white opacity-0 shadow transition group-hover:opacity-100 hover:bg-red-600"
+                      title="Remove diagram"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* User-pasted MS diagrams — blue border to distinguish */}
-        {userDiagrams.length > 0 && (
-          <div className="mb-3">
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-indigo-400">
-              MS Diagram(s) — Pasted
-            </p>
-            <div className="flex flex-col gap-2">
-              {userDiagrams.map((src, i) => (
-                <div key={`user-${i}`} className="group relative">
-                  <img
-                    src={src}
-                    alt={`Pasted MS Diagram ${i + 1}`}
-                    className="max-h-44 w-full rounded-lg border-2 border-indigo-400 bg-white object-contain p-2"
-                  />
-                  <span className="absolute left-2 top-2 rounded bg-indigo-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
-                    Pasted
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeUserDiagram(i)}
-                    className="absolute right-2 top-2 rounded-md bg-red-500 p-1 text-white opacity-0 shadow transition group-hover:opacity-100 hover:bg-red-600"
-                    title="Remove pasted diagram"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Paste tip — shown only when no diagrams present */}
-        {!hasDiagrams && (
+        {/* Paste tip */}
+        {currentDiagrams.length === 0 && (
           <p className="mb-2 text-[10px] text-slate-400">
             💡 Ctrl+V anywhere on this row to paste an MS diagram.
           </p>
@@ -348,7 +296,7 @@ const MarkingSchemeCard = ({ markingSchemeData, allEntries = [], onEntryChange }
           <thead className="bg-slate-50">
             <tr>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 w-28">Question</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Final Answer &amp; Diagrams</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Final Answer & Diagrams</th>
               <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-600 w-20">Marks</th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Method Steps</th>
             </tr>
@@ -368,7 +316,7 @@ const MarkingSchemeCard = ({ markingSchemeData, allEntries = [], onEntryChange }
 
       <div className="px-5 pb-4">
         <p className="text-xs text-slate-400 italic">
-          ✏️ Editable. Ctrl+V on any row to paste a diagram. Click "Approve All &amp; Save" to persist.
+          ✏️ Editable. Ctrl+V on any row to paste a diagram. Click "Approve All & Save" to persist.
         </p>
       </div>
     </div>

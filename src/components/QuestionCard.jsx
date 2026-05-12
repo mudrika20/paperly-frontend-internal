@@ -59,11 +59,23 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
   const [options,           setOptions]            = useState(norm.options);
   const [difficultyOverride, setDifficultyOverride] = useState(norm.difficultyOverride);
 
-  // ── TWO SEPARATE DIAGRAM STATES ──────────────────────────────────────────
-  // aiDiagrams   : extracted by Gemini, resets when backend data changes.
-  // userDiagrams : pasted by the user manually, NEVER reset by useEffect.
-  const [aiDiagrams,   setAiDiagrams]   = useState(norm.aiDiagrams);
-  const [userDiagrams, setUserDiagrams] = useState([]);
+  const pastedSetRef = useRef(new Set());
+
+  // Single Source of Truth: Derive from props, flatten deeply, and deduplicate
+  const rawUrls = Array.isArray(data.diagram_urls) ? data.diagram_urls : [];
+  const legacyImages = Array.isArray(data.diagram_images_base64) ? data.diagram_images_base64 : (data.diagram_image_base64 ? [data.diagram_image_base64] : []);
+  const currentDiagrams = [...new Set([...rawUrls, ...legacyImages].flat(Infinity).filter(u => typeof u === 'string' && u.trim() !== '' && u !== '[NEEDS_CROP]'))];
+
+  const appendUserDiagram = (dataUrl) => {
+    if (!dataUrl) return;
+    pastedSetRef.current.add(dataUrl);
+    onChange({ diagram_urls: [...currentDiagrams, dataUrl] });
+  };
+
+  const removeDiagram = (idx) => {
+    const next = currentDiagrams.filter((_, i) => i !== idx);
+    onChange({ diagram_urls: next });
+  };
 
   // Sync from backend when data prop changes — only AI diagrams reset.
   // User-pasted diagrams survive every parent re-render.
@@ -73,15 +85,8 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
     setQuestionType(n.questionType);
     setOptions(n.options);
     setDifficultyOverride(n.difficultyOverride);
-    setAiDiagrams(n.aiDiagrams);
-    // ← userDiagrams intentionally NOT touched here
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
-
-  // ── Notify parent with merged diagram list ────────────────────────────────
-  const notifyDiagramChange = (nextAi, nextUser) => {
-    onChange({ diagram_urls: [...nextAi, ...nextUser] });
-  };
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -113,33 +118,6 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
       reader.readAsDataURL(file);
     });
 
-  // Appends a user-pasted/uploaded diagram WITHOUT touching aiDiagrams.
-  const appendUserDiagram = (dataUrl) => {
-    if (!dataUrl) return;
-    setUserDiagrams((prev) => {
-      const next = [...prev, dataUrl];
-      notifyDiagramChange(aiDiagrams, next);
-      return next;
-    });
-  };
-
-  // Remove an AI diagram by its index within aiDiagrams.
-  const removeAiDiagram = (idx) => {
-    setAiDiagrams((prev) => {
-      const next = prev.filter((_, i) => i !== idx);
-      notifyDiagramChange(next, userDiagrams);
-      return next;
-    });
-  };
-
-  // Remove a user diagram by its index within userDiagrams.
-  const removeUserDiagram = (idx) => {
-    setUserDiagrams((prev) => {
-      const next = prev.filter((_, i) => i !== idx);
-      notifyDiagramChange(aiDiagrams, next);
-      return next;
-    });
-  };
 
   const handleDiagramFile = async (file) => {
     if (!file || !file.type.startsWith("image/")) return;
@@ -161,7 +139,7 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
     const imgFile = files.find((f) => f.type.startsWith("image/"));
 
     if (imgFile) {
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();
       await handleDiagramFile(imgFile);
       return;
     }
@@ -171,7 +149,7 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
     const imgItem = items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
 
     if (imgItem) {
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();
       const file = imgItem.getAsFile();
       if (file) await handleDiagramFile(file);
     }
@@ -188,54 +166,35 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
     norm.cognitiveDemand === "HIGH" ? "bg-red-100 text-red-800"      :
                                       "bg-yellow-100 text-yellow-800";
 
-  /**
-   * DiagramStrip — renders AI diagrams and user diagrams separately
-   * so each has its own correct remove handler. User diagrams get a
-   * distinct border so it's visually clear they were manually added.
-   */
   const DiagramStrip = () => (
     <div className="space-y-2">
-      {/* AI-extracted diagrams */}
-      {aiDiagrams.map((src, i) => (
-        <div key={`ai-${i}`} className="relative">
-          <img
-            src={src}
-            alt={`AI Diagram ${i + 1}`}
-            className="max-h-44 w-full rounded-lg border border-slate-200 bg-white object-contain p-2"
-          />
-          <button
-            type="button"
-            onClick={() => removeAiDiagram(i)}
-            className="absolute right-2 top-2 rounded-full bg-red-600 px-2 py-1 text-xs font-semibold text-white shadow hover:bg-red-700"
-            title="Remove AI diagram"
-          >
-            ✕
-          </button>
-        </div>
-      ))}
-
-      {/* User-pasted diagrams — blue border to distinguish */}
-      {userDiagrams.map((src, i) => (
-        <div key={`user-${i}`} className="relative">
-          <img
-            src={src}
-            alt={`Pasted Diagram ${i + 1}`}
-            className="max-h-44 w-full rounded-lg border-2 border-indigo-400 bg-white object-contain p-2"
-          />
-          {/* Label so reviewer knows this was manually pasted */}
-          <span className="absolute left-2 top-2 rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-            Pasted
-          </span>
-          <button
-            type="button"
-            onClick={() => removeUserDiagram(i)}
-            className="absolute right-2 top-2 rounded-full bg-red-600 px-2 py-1 text-xs font-semibold text-white shadow hover:bg-red-700"
-            title="Remove pasted diagram"
-          >
-            ✕
-          </button>
-        </div>
-      ))}
+      {currentDiagrams.map((src, i) => {
+        const isPasted = pastedSetRef.current.has(src);
+        return (
+          <div key={`diag-${i}`} className="relative group">
+            <img
+              src={src}
+              alt={`Diagram ${i + 1}`}
+              className={`max-h-44 w-full rounded-lg object-contain p-2 ${
+                isPasted ? "border-2 border-indigo-400 bg-white" : "border border-slate-200 bg-white"
+              }`}
+            />
+            {isPasted && (
+              <span className="absolute left-2 top-2 rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white shadow">
+                Pasted
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); removeDiagram(i); }}
+              className="absolute right-2 top-2 rounded-full bg-red-600 px-2 py-1 text-xs font-semibold text-white shadow opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700"
+              title="Remove diagram"
+            >
+              ✕
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 
