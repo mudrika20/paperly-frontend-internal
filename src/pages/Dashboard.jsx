@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom"; // Added Link import
 import DualDropZone from "../components/DualDropZone";
 import QuestionCard from "../components/QuestionCard";
 import MarkingSchemeCard from "../components/MarkingSchemeCard";
@@ -413,6 +414,12 @@ const Dashboard = () => {
           <h1 className="text-xl font-bold text-slate-800 sm:text-2xl">
             📚 Paperly Ingestion Dashboard
           </h1>
+          <Link 
+            to="/qa"
+            className="mt-2 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+          >
+            🛡️ Go to QA Dashboard
+          </Link>
           <p className="mt-1 text-sm text-slate-500">
             Upload a Question Paper or Marking Scheme PDF. The AI will extract and structure everything automatically.
           </p>
