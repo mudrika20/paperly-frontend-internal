@@ -165,6 +165,25 @@ export const fetchQuestionCount = async () => {
   }
 };
 
+// ── Fetch QA Dashboard Report ────────────────────────────────────────────────
+export const fetchQADashboardReport = async (force = false) => {
+  try {
+    const url = force ? `/v1/internal/qa-dashboard?force=true` : `/v1/internal/qa-dashboard`;
+    const { data } = await apiClient.get(url);
+    return data;
+  } catch (error) {
+    const payload = parseErrorPayload(error);
+    const errorMessage =
+      payload?.message ||
+      payload?.error ||
+      `Server Error ${error?.response?.status || 500}: Failed to load QA report.`;
+    throw new ApiPipelineError(errorMessage, {
+      status: error?.response?.status || null,
+      details: payload,
+    });
+  }
+};
+
 // ── Manual pairing fallback API ───────────────────────────────────────────────
 // Used when AI pairing fails or for direct administrator manual pairing
 export const manualPairDocuments = async (qp_id, ms_id, ref_code_override = null) => {

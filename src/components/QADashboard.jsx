@@ -14,12 +14,11 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { fetchQADashboardReport } from '../services/apiHandler'; // Import the new API function
 
 // ---------------------------------------------------------------------------
-// Config
+// Config (Removed - using apiHandler now)
 // ---------------------------------------------------------------------------
-const API_BASE = import.meta.env?.VITE_API_BASE ?? 'http://localhost:5000';
-const QA_ENDPOINT = `${API_BASE}/api/v1/internal/qa-dashboard`;
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -269,14 +268,8 @@ const QADashboard = () => {
         setLoading(true);
         setError(null);
         try {
-            const url = force ? `${QA_ENDPOINT}?force=true` : QA_ENDPOINT;
-            const res = await fetch(url);
-
-            if (!res.ok) {
-                throw new Error(`API returned ${res.status} ${res.statusText}`);
-            }
-
-            const json = await res.json();
+            // Use the centralized API function
+            const json = await fetchQADashboardReport(force);
 
             if (json.success) {
                 setReport(json.data);
