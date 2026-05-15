@@ -3,22 +3,21 @@
  * ===============
  * Real-time data-ingestion quality dashboard for Paperly.
  *
- * Renders the granular QA report produced by qaAgent.js:
- *  - System health score with colour-coded severity
+ * v2 — Renders the Smart Merge Detection output from qaAgent v2:
+ *  - System health score with colour-coded severity + per-penalty breakdown
  *  - Unpaired papers
- *  - QP/MS count mismatches with EXACT missing canonical IDs as pill-tags
- *    (orange = missing in MS, blue = missing in QP)
+ *  - QP/MS mismatches with four distinct sub-sections per paper:
+ *      · ❌ missing_in_ms  — orange pills, high-severity extraction failure
+ *      · ❌ missing_in_qp  — blue pills, high-severity extraction failure
+ *      · 🔀 merged_in_ms  — teal arrow-pair pills, low-severity LLM quirk
+ *      · 🔀 merged_in_qp  — teal arrow-pair pills, low-severity LLM quirk
  *  - Papers with suspected missing diagrams + their specific question IDs
  *  - Ghost data: UNKNOWN IDs + orphaned floating questions
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchQADashboardReport } from '../services/apiHandler'; // Import the new API function
-
-// ---------------------------------------------------------------------------
-// Config (Removed - using apiHandler now)
-// ---------------------------------------------------------------------------
+import { fetchQADashboardReport } from '../services/apiHandler';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -27,10 +26,11 @@ import { fetchQADashboardReport } from '../services/apiHandler'; // Import the n
 /** Coloured pill tag used for canonical question IDs. */
 const IdPill = ({ id, variant = 'orange' }) => {
     const styles = {
-        orange: 'bg-orange-950/50 text-orange-300 border border-orange-700/60',
-        blue:   'bg-blue-950/50   text-blue-300   border border-blue-700/60',
-        yellow: 'bg-yellow-950/50 text-yellow-300 border border-yellow-700/60',
-        red:    'bg-red-950/50    text-red-300     border border-red-700/60',
+        orange : 'bg-orange-950/50 text-orange-300 border border-orange-700/60',
+        blue   : 'bg-blue-950/50   text-blue-300   border border-blue-700/60',
+        yellow : 'bg-yellow-950/50 text-yellow-300 border border-yellow-700/60',
+        red    : 'bg-red-950/50    text-red-300     border border-red-700/60',
+        teal   : 'bg-teal-950/50   text-teal-300    border border-teal-700/60',
     };
     return (
         <span className={`inline-block rounded px-2 py-0.5 text-xs font-mono font-semibold ${styles[variant] ?? styles.orange}`}>
@@ -38,6 +38,19 @@ const IdPill = ({ id, variant = 'orange' }) => {
         </span>
     );
 };
+
+/**
+ * Arrow pill for merged-ID entries.
+ * Renders as:  "4.b  →  4.a"
+ * The arrow visually communicates the merge relationship without ambiguity.
+ */
+const MergedPill = ({ missingId, mergedInto }) => (
+    <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-mono font-semibold bg-teal-950/50 text-teal-300 border border-teal-700/60">
+        <span>{missingId}</span>
+        <span className="text-teal-500 mx-0.5">→</span>
+        <span className="text-teal-200">{mergedInto}</span>
+    </span>
+);
 
 /** Section card wrapper. */
 const Card = ({ children, className = '' }) => (
@@ -65,10 +78,20 @@ const AllClear = ({ message }) => (
 // Health Score
 // ---------------------------------------------------------------------------
 const HealthScoreCard = ({ score, penalties }) => {
-    const isHealthy = score > 90;
-    const borderColor = isHealthy ? 'border-green-500' : score > 70 ? 'border-yellow-500' : 'border-red-500';
-    const textColor   = isHealthy ? 'text-green-400'  : score > 70 ? 'text-yellow-400'  : 'text-red-400';
-    const bgColor     = isHealthy ? 'bg-green-900/20' : score > 70 ? 'bg-yellow-900/20' : 'bg-red-900/20';
+    const isHealthy  = score > 90;
+    const isWarning  = score > 70;
+    const borderColor = isHealthy ? 'border-green-500'  : isWarning ? 'border-yellow-500'  : 'border-red-500';
+    const textColor   = isHealthy ? 'text-green-400'    : isWarning ? 'text-yellow-400'    : 'text-red-400';
+    const bgColor     = isHealthy ? 'bg-green-900/20'   : isWarning ? 'bg-yellow-900/20'   : 'bg-red-900/20';
+
+    // Human-readable labels for each penalty key
+    const PENALTY_LABELS = {
+        fromUnpairedPapers : 'Unpaired Papers',
+        fromMissingIDs     : 'Missing IDs',
+        fromMergedIDs      : 'Merged IDs (LLM quirk)',
+        fromUnknownIDs     : 'UNKNOWN IDs',
+        fromOrphanedKeys   : 'Orphaned Keys',
+    };
 
     return (
         <div className={`p-6 rounded-xl mb-8 border-l-4 shadow-lg ${bgColor} ${borderColor}`}>
@@ -84,9 +107,12 @@ const HealthScoreCard = ({ score, penalties }) => {
                         val > 0 ? (
                             <span key={key}
                                 className="text-xs bg-gray-800 border border-gray-700 text-gray-400 rounded px-2 py-1">
-                                {key.replace('from', '').replace(/([A-Z])/g, ' $1').trim()}: <span className="text-red-400 font-bold">-{val}</span>
+                                {PENALTY_LABELS[key] ?? key}:{' '}
+                                <span className={key === 'fromMergedIDs' ? 'text-teal-400 font-bold' : 'text-red-400 font-bold'}>
+                                    -{val}
+                                </span>
                             </span>
-                        ) : null
+                        ) : null,
                     )}
                 </div>
             )}
@@ -117,68 +143,136 @@ const UnpairedPapersCard = ({ papers = [] }) => (
 );
 
 // ---------------------------------------------------------------------------
-// QP/MS Mismatch Card  — granular pill rendering
+// QP/MS Mismatch Card  — four sub-sections per paper entry
 // ---------------------------------------------------------------------------
-const MismatchCard = ({ mismatches = [] }) => (
-    <Card>
-        <CardHeader label="⚠️ QP / MS ID Mismatches" count={mismatches.length} colorClass="text-red-400" />
-        {mismatches.length === 0
-            ? <AllClear message="Perfect pairing! All IDs match." />
-            : (
-                <ul className="space-y-4">
-                    {mismatches.map((m, idx) => (
-                        <li key={idx} className="bg-gray-800/50 rounded-lg p-4 shadow-md">
-                            {/* Paper key + delta badge */}
-                            <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
-                                <span className="font-mono text-gray-200 font-bold text-sm">{m.paper}</span>
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-950/40 text-red-300 border border-red-800/50">
-                                    QP: {m.qp_total} &nbsp;|&nbsp; MS: {m.ms_total}
-                                    &nbsp;
-                                    {m.delta !== undefined && (
-                                        <span className={m.delta > 0 ? 'text-orange-400' : 'text-blue-400'}>
-                                            (Δ {m.delta > 0 ? '+' : ''}{m.delta})
+const MismatchCard = ({ mismatches = [] }) => {
+    // Total issue count: all confirmed-missing + all merged (different severities)
+    const totalIssues = mismatches.reduce((acc, m) => (
+        acc
+        + (m.missing_in_ms?.length ?? 0)
+        + (m.missing_in_qp?.length ?? 0)
+        + (m.merged_in_ms?.length  ?? 0)
+        + (m.merged_in_qp?.length  ?? 0)
+    ), 0);
+
+    return (
+        <Card>
+            <CardHeader
+                label="⚠️ QP / MS ID Mismatches"
+                count={mismatches.length}
+                colorClass="text-red-400"
+            />
+            {mismatches.length === 0
+                ? <AllClear message="Perfect pairing! All IDs match." />
+                : (
+                    <>
+                        {/* Issue-count summary badge */}
+                        {totalIssues > 0 && (
+                            <p className="text-xs text-gray-500 mb-3">
+                                {totalIssues} total ID issues across {mismatches.length} paper{mismatches.length > 1 ? 's' : ''} —
+                                <span className="text-red-400 font-semibold"> missing</span> = extraction failure,
+                                <span className="text-teal-400 font-semibold"> merged</span> = LLM formatting quirk
+                            </p>
+                        )}
+
+                        <ul className="space-y-4">
+                            {mismatches.map((m, idx) => (
+                                <li key={idx} className="bg-gray-800/50 rounded-lg p-4 shadow-md">
+
+                                    {/* Paper key + delta badge */}
+                                    <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
+                                        <span className="font-mono text-gray-200 font-bold text-sm">{m.paper}</span>
+                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-950/40 text-red-300 border border-red-800/50">
+                                            QP: {m.qp_total} &nbsp;|&nbsp; MS: {m.ms_total}
+                                            {m.delta !== undefined && (
+                                                <span className={`ml-1.5 ${m.delta > 0 ? 'text-orange-400' : 'text-blue-400'}`}>
+                                                    (Δ {m.delta > 0 ? '+' : ''}{m.delta})
+                                                </span>
+                                            )}
                                         </span>
+                                    </div>
+
+                                    {/* ── ❌ Missing in MS (high-severity, orange) ── */}
+                                    {m.missing_in_ms?.length > 0 && (
+                                        <div className="mt-2">
+                                            <p className="text-orange-400 text-xs font-semibold mb-1.5 uppercase tracking-wide">
+                                                ❌ Missing in MS — check MS regex / extraction ({m.missing_in_ms.length})
+                                            </p>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {m.missing_in_ms.map((id, i) => (
+                                                    <IdPill key={i} id={id} variant="orange" />
+                                                ))}
+                                            </div>
+                                        </div>
                                     )}
-                                </span>
-                            </div>
 
-                            {/* IDs missing in MS — these are QP questions with no matching MS entry */}
-                            {m.missing_in_ms?.length > 0 && (
-                                <div className="mt-2">
-                                    <p className="text-orange-400 text-xs font-semibold mb-1.5 uppercase tracking-wide">
-                                        Missing in MS — check MS regex / extraction ({m.missing_in_ms.length})
-                                    </p>
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {m.missing_in_ms.map((id, i) => (
-                                            <IdPill key={i} id={id} variant="orange" />
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
+                                    {/* ── ❌ Missing in QP (high-severity, blue) ── */}
+                                    {m.missing_in_qp?.length > 0 && (
+                                        <div className="mt-3">
+                                            <p className="text-blue-400 text-xs font-semibold mb-1.5 uppercase tracking-wide">
+                                                ❌ Missing in QP — check QP regex / extraction ({m.missing_in_qp.length})
+                                            </p>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {m.missing_in_qp.map((id, i) => (
+                                                    <IdPill key={i} id={id} variant="blue" />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
 
-                            {/* IDs missing in QP — MS has answers with no corresponding question */}
-                            {m.missing_in_qp?.length > 0 && (
-                                <div className="mt-3">
-                                    <p className="text-blue-400 text-xs font-semibold mb-1.5 uppercase tracking-wide">
-                                        Missing in QP — check QP regex / extraction ({m.missing_in_qp.length})
-                                    </p>
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {m.missing_in_qp.map((id, i) => (
-                                            <IdPill key={i} id={id} variant="blue" />
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </li>
-                    ))}
-                </ul>
-            )
-        }
-    </Card>
-);
+                                    {/* ── 🔀 Merged in MS (low-severity, teal) ── */}
+                                    {m.merged_in_ms?.length > 0 && (
+                                        <div className="mt-3">
+                                            <p className="text-teal-400 text-xs font-semibold mb-1.5 uppercase tracking-wide">
+                                                🔀 Merged in MS — sub-part absorbed by sibling/parent ({m.merged_in_ms.length})
+                                            </p>
+                                            <p className="text-gray-600 text-xs mb-2 italic">
+                                                ID on left was not extracted separately; its content was found inside the doc on the right.
+                                            </p>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {m.merged_in_ms.map((entry, i) => (
+                                                    <MergedPill
+                                                        key={i}
+                                                        missingId={entry.missing_id}
+                                                        mergedInto={entry.merged_into}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* ── 🔀 Merged in QP (low-severity, teal) ── */}
+                                    {m.merged_in_qp?.length > 0 && (
+                                        <div className="mt-3">
+                                            <p className="text-teal-400 text-xs font-semibold mb-1.5 uppercase tracking-wide">
+                                                🔀 Merged in QP — sub-part absorbed by sibling/parent ({m.merged_in_qp.length})
+                                            </p>
+                                            <p className="text-gray-600 text-xs mb-2 italic">
+                                                ID on left was not extracted separately; its content was found inside the doc on the right.
+                                            </p>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {m.merged_in_qp.map((entry, i) => (
+                                                    <MergedPill
+                                                        key={i}
+                                                        missingId={entry.missing_id}
+                                                        mergedInto={entry.merged_into}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                    </>
+                )
+            }
+        </Card>
+    );
+};
 
 // ---------------------------------------------------------------------------
-// Missing Diagrams Card — shows paper + suspicious canonical IDs as pills
+// Missing Diagrams Card
 // ---------------------------------------------------------------------------
 const MissingDiagramsCard = ({ papersMissingDiagrams = [] }) => (
     <Card>
@@ -193,12 +287,10 @@ const MissingDiagramsCard = ({ papersMissingDiagrams = [] }) => (
                 <ul className="space-y-4">
                     {papersMissingDiagrams.map((d, idx) => (
                         <li key={idx} className="bg-gray-800/50 rounded-lg p-4">
-                            {/* Paper key */}
                             <p className="font-mono text-gray-200 font-bold text-sm mb-2">{d.key}</p>
                             <p className="text-yellow-500/80 text-xs font-semibold mb-1.5 uppercase tracking-wide">
                                 Suspicious question IDs ({d.suspicious_questions?.length ?? 0})
                             </p>
-                            {/* Specific canonical IDs whose LaTeX mentions a diagram but diagram_urls is empty */}
                             <div className="flex flex-wrap gap-1.5">
                                 {(d.suspicious_questions ?? []).map((qId, i) => (
                                     <IdPill key={i} id={qId} variant="yellow" />
@@ -219,7 +311,6 @@ const GhostDataCard = ({ unknownIDs = 0, orphanedKeys = [] }) => (
     <Card>
         <CardHeader label="👻 Ghost Data" count={unknownIDs + orphanedKeys.length} colorClass="text-purple-400" />
         <div className="space-y-5">
-            {/* UNKNOWN IDs */}
             <div className="flex justify-between items-center">
                 <div>
                     <p className="text-gray-300 text-sm font-medium">"UNKNOWN" Canonical IDs</p>
@@ -230,7 +321,6 @@ const GhostDataCard = ({ unknownIDs = 0, orphanedKeys = [] }) => (
                 </span>
             </div>
 
-            {/* Orphaned keys */}
             <div>
                 <div className="flex justify-between items-center mb-2">
                     <div>
@@ -268,9 +358,7 @@ const QADashboard = () => {
         setLoading(true);
         setError(null);
         try {
-            // Use the centralized API function
             const json = await fetchQADashboardReport(force);
-
             if (json.success) {
                 setReport(json.data);
             } else {
@@ -284,11 +372,8 @@ const QADashboard = () => {
         }
     }, []);
 
-    useEffect(() => {
-        fetchReport();
-    }, [fetchReport]);
+    useEffect(() => { fetchReport(); }, [fetchReport]);
 
-    // ── Loading / error states ────────────────────────────────────────────────
     if (!report && loading) {
         return (
             <div className="min-h-screen bg-gray-950 flex items-center justify-center">
@@ -321,7 +406,6 @@ const QADashboard = () => {
 
     if (!report) return null;
 
-    // ── Main render ───────────────────────────────────────────────────────────
     return (
         <div className="min-h-screen bg-gray-950 text-gray-200 p-6 md:p-8">
             <div className="max-w-6xl mx-auto">
@@ -371,7 +455,7 @@ const QADashboard = () => {
 
                 {/* Footer */}
                 <p className="text-center text-gray-700 text-xs mt-10">
-                    Paperly QA Agent · Audits run daily at midnight · Use "Force Deep Scan" for on-demand analysis
+                    Paperly QA Agent v2 · Smart Merge Detection · Audits run daily at midnight · Use "Force Deep Scan" for on-demand analysis
                 </p>
             </div>
         </div>
