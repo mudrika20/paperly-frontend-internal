@@ -170,6 +170,35 @@ const cleanMsAnchorPlaceholderRow = (row = {}) => {
   };
 };
 
+const parseGroupedSplitRepairHint = (warning = "") => {
+  const text = String(warning || "");
+  if (!/REPAIR_HINT\s+split_grouped_row/i.test(text)) return null;
+  const missing = text.match(/\bmissing_id=([^\s]+)/i)?.[1];
+  const source = text.match(/\bsource_id=([^\s]+)/i)?.[1];
+  const confidence = text.match(/\bconfidence=([^\s.]+)/i)?.[1] || "";
+  const missingId = normalizeCanonicalForUi(missing);
+  const sourceId = normalizeCanonicalForUi(source);
+  if (!missingId || !sourceId) return null;
+  return { missingId, sourceId, confidence, warning: text };
+};
+
+const collectGroupedSplitRepairHints = (items = []) => {
+  const hints = new Map();
+  items.forEach((item, index) => {
+    const warnings = Array.isArray(item?.validation_warnings) ? item.validation_warnings : [];
+    warnings.forEach((warning) => {
+      const parsed = parseGroupedSplitRepairHint(warning);
+      if (!parsed) return;
+      hints.set(parsed.missingId, {
+        ...parsed,
+        sourceIndex: index,
+        sourceRow: item,
+      });
+    });
+  });
+  return hints;
+};
+
 const WORKFLOW_STORAGE_KEY = "paperly_ingestion_workflow_v1";
 
 const uniqueCanonicalIds = (items = []) => [
@@ -386,6 +415,21 @@ const humanizeIssueReason = (reason = "", item = {}) => {
   const lower = text.toLowerCase();
   const id = getRowCanonical(item);
 
+  if (lower.includes("repair_hint split_grouped_row")) {
+    const hint = parseGroupedSplitRepairHint(text);
+    return {
+      title: "Grouped Row Needs Split",
+      severity: "Medium",
+      problem: hint
+        ? `${displayLabelFromCanonical(hint.missingId) || hint.missingId} appears to be grouped inside ${displayLabelFromCanonical(hint.sourceId) || hint.sourceId}.`
+        : text,
+      solution: "Open the source row, create a split-review row for the missing ID, then trim both rows against the PDF.",
+      expected: hint
+        ? `Expected: separate rows for ${hint.missingId} and ${hint.sourceId}`
+        : "Expected: separate rows for each printed subpart",
+    };
+  }
+
   if (lower.includes("missing_or_unknown_canonical_id")) {
     return {
       title: "Canonical ID missing",
@@ -507,6 +551,7 @@ const buildUploadIssueCards = ({ report, blockers = [], items = [] }) => {
   const extraIds = Array.isArray(parity.extra_in_current) ? parity.extra_in_current : [];
   const anchorMissingIds = Array.isArray(msAnchor.missing_qp_leaf_ids) ? msAnchor.missing_qp_leaf_ids : [];
   const duplicateIds = Array.isArray(local.duplicate_canonical_ids) ? local.duplicate_canonical_ids : [];
+  const groupedSplitHints = collectGroupedSplitRepairHints(items);
   const hasStructuralIssues =
     blockers.length > 0 ||
     missingIds.length > 0 ||
@@ -584,16 +629,26 @@ const buildUploadIssueCards = ({ report, blockers = [], items = [] }) => {
   }
 
   missingIds.forEach((id) => {
-    const index = findLikelyRowIndexForCanonical(items, id);
+    const normalizedId = normalizeCanonicalForUi(id);
+    const hint = groupedSplitHints.get(normalizedId);
+    const index = Number.isInteger(hint?.sourceIndex) ? hint.sourceIndex : findLikelyRowIndexForCanonical(items, id);
     addIssue({
-      type: "missing_counterpart_id",
+      type: hint ? "split_grouped_row_missing" : "missing_counterpart_id",
       severity: "High",
       index,
-      id,
+      id: normalizedId || id,
+      sourceId: hint?.sourceId,
+      sourceIndex: hint?.sourceIndex,
       title: "QP/MS ID Missing Here",
-      problem: `${displayLabelFromCanonical(id) || id} exists in the paired document but not in this upload.`,
-      solution: "Open the nearest matching row, check the PDF, then split/rename the row if the subpart is grouped. If many IDs are missing, redo extraction.",
-      expected: `Expected ID: ${id}`,
+      problem: hint
+        ? `${displayLabelFromCanonical(id) || id} exists in the paired document and appears grouped inside ${displayLabelFromCanonical(hint.sourceId) || hint.sourceId}.`
+        : `${displayLabelFromCanonical(id) || id} exists in the paired document but not in this upload.`,
+      solution: hint
+        ? "Open the source row, create a split-review row for the missing ID, then trim the copied text against the PDF. Do not run rescue for this case."
+        : "Open the nearest matching row, check the PDF, then split/rename the row if the subpart is grouped. If many IDs are missing, redo extraction.",
+      expected: hint
+        ? `Expected: ${normalizedId} split out from ${hint.sourceId}`
+        : `Expected ID: ${id}`,
     });
   });
 
@@ -1479,6 +1534,48 @@ const Dashboard = () => {
 
   // ── Metadata approved ─────────────────────────────────────────────────────
 
+  const handleCreateSplitReviewRow = (issue) => {
+    const missingId = normalizeCanonicalForUi(issue?.id);
+    const sourceIndex = Number.isInteger(issue?.sourceIndex) ? issue.sourceIndex : issue?.index;
+    if (!missingId || !Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= extractedQuestions.length) {
+      toast.warn("No source row found for this grouped-row repair.");
+      return;
+    }
+    if (extractedQuestions.some((row) => getRowCanonical(row) === missingId)) {
+      toast.info(`${missingId} already exists. Open that row and verify it.`);
+      return;
+    }
+
+    const sourceRow = extractedQuestions[sourceIndex] || {};
+    const sourceId = getRowCanonical(sourceRow) || issue?.sourceId || "source row";
+    const missingLabel = displayLabelFromCanonical(missingId) || missingId;
+    const sourceText = String(sourceRow.question_latex || "").trim();
+    const copiedText = sourceText.startsWith(missingLabel)
+      ? sourceText
+      : `${missingLabel} [SPLIT REVIEW: copied from ${sourceId}. Trim this row to only the printed ${missingLabel} subpart before saving.]\n\n${sourceText}`;
+    const warnings = [
+      ...(Array.isArray(sourceRow.validation_warnings) ? sourceRow.validation_warnings : []),
+      `Review repair created split row ${missingId} from grouped source row ${sourceId}. Trim copied text against the PDF before saving.`,
+    ];
+    const newRow = cleanMsAnchorPlaceholderRow({
+      ...sourceRow,
+      canonical_question_id: missingId,
+      question_id: missingLabel,
+      parent_canonical_id: canonicalRoot(missingId) || missingId,
+      question_latex: copiedText,
+      needs_review: true,
+      validation_warnings: [...new Set(warnings)],
+    });
+
+    setExtractedQuestions((prev) => {
+      const next = [...prev, newRow].sort((a, b) => compareCanonicalIds(getRowCanonical(a), getRowCanonical(b)));
+      const nextIndex = next.findIndex((row) => getRowCanonical(row) === missingId);
+      setTimeout(() => setCurrentQuestionIndex(Math.max(0, nextIndex)), 0);
+      return next;
+    });
+    toast.success(`Created editable split row ${missingId}. Trim it against the PDF before saving.`);
+  };
+
   const handleMetadataApprove = (approvedMeta) => {
     setExtractedMeta(approvedMeta);
     setExtractionStep("reviewQuestions");
@@ -1706,6 +1803,14 @@ const Dashboard = () => {
 
       if (exactRecovered.length === 0) {
         const pages = result?.rescue_report?.pages_attempted || [];
+        const groupedHints = collectGroupedSplitRepairHints(extractedQuestions);
+        const groupedIds = rescueCandidateIds.filter((id) => groupedHints.has(id));
+        if (groupedIds.length > 0) {
+          toast.warn(
+            `Rescue recovered 0 because ${groupedIds.join(", ")} appears grouped inside existing row(s). Use Create Split Row instead.`
+          );
+          return;
+        }
         toast.warn(
           `Targeted rescue ran ${pages.length ? `page(s) ${pages.join(", ")}` : "the likely pages"} but recovered 0 exact missing rows.`
         );
@@ -1747,6 +1852,22 @@ const Dashboard = () => {
       activeId &&
       !isLeafCanonical(activeId) &&
       rowHasChildCanonical(extractedQuestions, activeId);
+
+    if (activeUploadIssue.type === "split_grouped_row_missing" && !isMarkingScheme) {
+      activeIssueActions.push({
+        key: "open-source-row",
+        label: "Open Source Row",
+        disabled: loading || saving,
+        onClick: () => handleGoToIssue(activeUploadIssue),
+      });
+      activeIssueActions.push({
+        key: "create-split-row",
+        label: "Create Split Row",
+        variant: "primary",
+        disabled: loading || saving,
+        onClick: () => handleCreateSplitReviewRow(activeUploadIssue),
+      });
+    }
 
     if (["missing_counterpart_id", "ms_anchor_missing"].includes(activeUploadIssue.type) && !isMarkingScheme) {
       activeIssueActions.push({
