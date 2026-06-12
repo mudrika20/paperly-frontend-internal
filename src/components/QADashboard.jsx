@@ -11,7 +11,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchQADashboardReport, runQARepairAction } from '../services/apiHandler';
+import { fetchQADashboardReport } from '../services/apiHandler';
 
 const IdPill = ({ id, variant = 'orange' }) => {
     const styles = {
@@ -96,32 +96,6 @@ const InspectionGuide = ({ mismatch }) => {
                 </div>
             </div>
         </div>
-    );
-};
-
-const targetFromItem = (item) => ({
-    collection: item.collection,
-    document_id: item.document_id,
-    key: item.key,
-    canonical_question_id: item.canonical_question_id,
-});
-
-const RepairButton = ({ label, action, payload, onRepair, variant = 'yellow' }) => {
-    const styles = {
-        yellow: 'border-yellow-700/60 text-yellow-300 hover:bg-yellow-950/40',
-        red: 'border-red-700/60 text-red-300 hover:bg-red-950/40',
-        green: 'border-green-700/60 text-green-300 hover:bg-green-950/40',
-        blue: 'border-blue-700/60 text-blue-300 hover:bg-blue-950/40',
-    };
-
-    return (
-        <button
-            type="button"
-            onClick={() => onRepair(action, payload)}
-            className={`text-xs border rounded px-2.5 py-1 transition-colors ${styles[variant] ?? styles.yellow}`}
-        >
-            {label}
-        </button>
     );
 };
 
@@ -228,75 +202,6 @@ const FixPriorityCard = ({ plan = {} }) => {
                             </li>
                         ))}
                     </ul>
-                </div>
-            )}
-        </Card>
-    );
-};
-
-const RepairResultCard = ({ result, error, applying, onApply, onDismiss }) => {
-    if (!result && !error && !applying) return null;
-
-    return (
-        <Card className="mb-8 border-blue-900/70">
-            <CardHeader label="QA Repair Simulation" count={result?.matched ?? 0} colorClass="text-blue-400" />
-            {applying && <p className="text-sm text-gray-400">Running QA repair action...</p>}
-            {error && <p className="text-sm text-red-400">{error}</p>}
-            {result && (
-                <div className="space-y-4">
-                    <div className="bg-gray-950/50 border border-gray-800 rounded-lg p-4">
-                        <p className="text-sm text-gray-300">
-                            Action: <span className="font-mono text-blue-300">{result.action}</span>
-                            <span className="mx-2 text-gray-600">|</span>
-                            Mode: <span className={result.dryRun ? 'text-yellow-300' : 'text-green-300'}>
-                                {result.dryRun ? 'dry run, no DB write' : 'applied to DB'}
-                            </span>
-                        </p>
-                    </div>
-
-                    {result.preview?.length > 0 && (
-                        <ul className="space-y-2">
-                            {result.preview.slice(0, 10).map((item) => (
-                                <li key={`${item.collection}-${item.document_id}`} className="bg-gray-800/50 rounded px-3 py-2 text-xs text-gray-400">
-                                    <div className="flex flex-wrap gap-2 items-center">
-                                        <IdPill id={item.collection} variant="purple" />
-                                        <IdPill id={item.key} variant="blue" />
-                                        <IdPill id={item.canonical_question_id} variant="yellow" />
-                                        <span className="text-gray-500">{item.validation_status}</span>
-                                    </div>
-                                    <p className="text-gray-500 mt-1 truncate">{item.question_latex_preview}</p>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-
-                    {result.registry && (
-                        <div className="bg-gray-800/50 rounded px-3 py-2 text-xs text-gray-400">
-                            <p className="font-mono text-gray-300">{result.registry.key}</p>
-                            <p className="mt-1">
-                                {result.registry.before.status} -&gt; {result.registry.after.status}
-                            </p>
-                        </div>
-                    )}
-
-                    <div className="flex flex-wrap gap-2">
-                        {result.dryRun && (
-                            <button
-                                type="button"
-                                onClick={onApply}
-                                className="text-xs border border-green-700/60 text-green-300 hover:bg-green-950/40 rounded px-3 py-1.5 transition-colors"
-                            >
-                                Apply This Repair
-                            </button>
-                        )}
-                        <button
-                            type="button"
-                            onClick={onDismiss}
-                            className="text-xs border border-gray-700 text-gray-300 hover:bg-gray-800 rounded px-3 py-1.5 transition-colors"
-                        >
-                            Dismiss
-                        </button>
-                    </div>
                 </div>
             )}
         </Card>
@@ -496,7 +401,6 @@ const SavedPayloadIssuesCard = ({
     metadataConflictCount = 0,
     registryReferenceConflicts = [],
     registryReferenceConflictCount = 0,
-    onRepair,
 }) => {
     const count = invalidDiagramUrlCount + emptyTextCount + metadataConflictCount + registryReferenceConflictCount;
 
@@ -515,23 +419,12 @@ const SavedPayloadIssuesCard = ({
                             <ul className="space-y-1.5">
                                 {registryReferenceConflicts.slice(0, 10).map((item, idx) => (
                                     <li key={idx} className="bg-gray-800/50 rounded px-3 py-2 text-xs text-gray-400">
-                                        <div className="flex flex-wrap gap-2 items-center justify-between">
-                                            <div>
-                                                <span className="font-mono text-gray-300">{item.key}</span>
-                                                <span className="mx-2 text-gray-600">/</span>
-                                                <span>{item.field}</span>
-                                                <span className="mx-2 text-gray-600">/</span>
-                                                <span>{item.issue}</span>
-                                            </div>
-                                            {onRepair && (
-                                                <RepairButton
-                                                    label="Simulate Pointer Repair"
-                                                    action="rebuild_registry_pointers"
-                                                    payload={{ key: item.key, reason: item.issue }}
-                                                    onRepair={onRepair}
-                                                    variant="blue"
-                                                />
-                                            )}
+                                        <div>
+                                            <span className="font-mono text-gray-300">{item.key}</span>
+                                            <span className="mx-2 text-gray-600">/</span>
+                                            <span>{item.field}</span>
+                                            <span className="mx-2 text-gray-600">/</span>
+                                            <span>{item.issue}</span>
                                         </div>
                                     </li>
                                 ))}
@@ -547,26 +440,12 @@ const SavedPayloadIssuesCard = ({
                             <ul className="space-y-1.5">
                                 {invalidDiagramUrls.slice(0, 10).map((item, idx) => (
                                     <li key={idx} className="bg-gray-800/50 rounded px-3 py-2 text-xs text-gray-400">
-                                        <div className="flex flex-wrap gap-2 items-center justify-between">
-                                            <div>
-                                                <span className="font-mono text-gray-300">{item.key}</span>
-                                                <span className="mx-2 text-gray-600">/</span>
-                                                <span>{item.collection}</span>
-                                                <span className="mx-2 text-gray-600">/</span>
-                                                <span>{item.canonical_question_id}</span>
-                                            </div>
-                                            {onRepair && (
-                                                <RepairButton
-                                                    label="Simulate Quarantine"
-                                                    action="quarantine_rows"
-                                                    payload={{
-                                                        targets: [targetFromItem(item)],
-                                                        reason: 'Invalid saved diagram URL',
-                                                    }}
-                                                    onRepair={onRepair}
-                                                    variant="red"
-                                                />
-                                            )}
+                                        <div>
+                                            <span className="font-mono text-gray-300">{item.key}</span>
+                                            <span className="mx-2 text-gray-600">/</span>
+                                            <span>{item.collection}</span>
+                                            <span className="mx-2 text-gray-600">/</span>
+                                            <span>{item.canonical_question_id}</span>
                                         </div>
                                     </li>
                                 ))}
@@ -581,21 +460,7 @@ const SavedPayloadIssuesCard = ({
                             </p>
                             <div className="flex flex-wrap gap-1.5">
                                 {emptyTextItems.slice(0, 20).map((item, idx) => (
-                                    <span key={idx} className="inline-flex items-center gap-1.5">
-                                        <IdPill id={`${item.key}:${item.canonical_question_id}`} variant="red" />
-                                        {onRepair && (
-                                            <RepairButton
-                                                label="Quarantine"
-                                                action="quarantine_rows"
-                                                payload={{
-                                                    targets: [targetFromItem(item)],
-                                                    reason: 'Empty question_latex row',
-                                                }}
-                                                onRepair={onRepair}
-                                                variant="red"
-                                            />
-                                        )}
-                                    </span>
+                                    <IdPill key={idx} id={`${item.key}:${item.canonical_question_id}`} variant="red" />
                                 ))}
                             </div>
                         </div>
@@ -669,7 +534,7 @@ const GhostDataCard = ({ unknownIDs = 0, unknownIdSamples = [], orphanedKeys = [
     </Card>
 );
 
-const NeedsReviewCard = ({ count = 0, items = [], onRepair }) => (
+const NeedsReviewCard = ({ count = 0, items = [] }) => (
     <Card>
         <CardHeader label="Human Review Queue" count={count} colorClass="text-blue-400" />
         {count === 0 ? (
@@ -682,24 +547,10 @@ const NeedsReviewCard = ({ count = 0, items = [], onRepair }) => (
                 <ul className="space-y-2">
                     {items.slice(0, 20).map((item, idx) => (
                         <li key={idx} className="bg-gray-800/50 rounded px-3 py-2 text-xs text-gray-400">
-                            <div className="flex flex-wrap gap-2 items-center justify-between">
-                                <div className="flex flex-wrap gap-2 items-center">
-                                    <span className="font-mono text-gray-300">{item.key}</span>
-                                    <IdPill id={item.collection} variant="blue" />
-                                    <IdPill id={item.canonical_question_id} variant="yellow" />
-                                </div>
-                                {onRepair && (
-                                    <RepairButton
-                                        label="Mark Human Approved"
-                                        action="clear_review_rows"
-                                        payload={{
-                                            targets: [targetFromItem(item)],
-                                            reason: 'Verified against PDF by human reviewer',
-                                        }}
-                                        onRepair={onRepair}
-                                        variant="green"
-                                    />
-                                )}
+                            <div className="flex flex-wrap gap-2 items-center">
+                                <span className="font-mono text-gray-300">{item.key}</span>
+                                <IdPill id={item.collection} variant="blue" />
+                                <IdPill id={item.canonical_question_id} variant="yellow" />
                             </div>
                             {item.warnings?.length > 0 && (
                                 <p className="text-gray-500 mt-1 truncate">{item.warnings.join(' | ')}</p>
@@ -754,7 +605,7 @@ const SimpleDecisionCard = ({ report = {} }) => {
         empty_text_rows: 'Reject or re-extract affected rows; empty saved text is not production-safe.',
         invalid_diagram_urls: 'Re-crop, paste, or remove invalid diagram payloads.',
         metadata_conflicts: 'Fix the metadata fields or re-save with verified metadata.',
-        registry_reference_conflicts: 'Use pointer repair from detailed evidence, then run QA scan again.',
+        registry_reference_conflicts: 'Repair the pointer from the main/admin repair flow, then run QA scan again.',
         orphaned_keys: 'Attach the rows to PaperRegistry or remove stale rejected-upload rows.',
         human_review_pending: 'Open sampled rows, compare with PDF, then clear review only after checking.',
     };
@@ -860,7 +711,7 @@ const SituationGuideCard = () => {
             title: 'Registry / Orphan Issue',
             risk: 'High',
             meaning: 'Rows exist but the PaperRegistry pointer or key is missing/wrong.',
-            action: 'Use pointer repair when offered, or manually pair the correct QP/MS documents with the same unified_paper_key.',
+            action: 'Repair the pointer from the main/admin repair flow, or manually pair the correct QP/MS documents with the same unified_paper_key.',
         },
     ];
 
@@ -898,10 +749,6 @@ const QADashboard = () => {
     const [report, setReport] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [repairResult, setRepairResult] = useState(null);
-    const [repairPayload, setRepairPayload] = useState(null);
-    const [repairError, setRepairError] = useState(null);
-    const [repairApplying, setRepairApplying] = useState(false);
     const [showGuide, setShowGuide] = useState(false);
     const [showDetails, setShowDetails] = useState(false);
 
@@ -926,37 +773,6 @@ const QADashboard = () => {
     useEffect(() => {
         fetchReport(true);
     }, [fetchReport]);
-
-    const handleRepair = useCallback(async (action, payload = {}) => {
-        const nextPayload = { ...payload, action, dryRun: true };
-        setRepairApplying(true);
-        setRepairError(null);
-        setRepairResult(null);
-        setRepairPayload(nextPayload);
-        try {
-            const json = await runQARepairAction(nextPayload);
-            setRepairResult(json.data.result);
-        } catch (err) {
-            setRepairError(err.message ?? 'QA repair simulation failed');
-        } finally {
-            setRepairApplying(false);
-        }
-    }, []);
-
-    const applyLastRepair = useCallback(async () => {
-        if (!repairPayload) return;
-        setRepairApplying(true);
-        setRepairError(null);
-        try {
-            const json = await runQARepairAction({ ...repairPayload, dryRun: false });
-            setRepairResult(json.data.result);
-            if (json.data.report) setReport(json.data.report);
-        } catch (err) {
-            setRepairError(err.message ?? 'QA repair apply failed');
-        } finally {
-            setRepairApplying(false);
-        }
-    }, [repairPayload]);
 
     if (!report && loading) {
         return (
@@ -997,11 +813,18 @@ const QADashboard = () => {
                             Back to Main Dashboard
                         </Link>
                         <h1 className="text-2xl md:text-3xl font-bold text-white">
-                            Data Ingestion QA Dashboard
+                            Production QA Report
                         </h1>
                         <p className="text-xs text-gray-400 mt-1.5">
                             Last scanned: {new Date(report.timestamp).toLocaleString()}
                         </p>
+                        <div className="mt-3 inline-flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 rounded-lg border border-blue-900/60 bg-blue-950/30 px-3 py-2 text-xs text-blue-100">
+                            <span className="font-semibold">{report.scopeLabel ?? 'Recent upload scope'}</span>
+                            {report.cutoffLocal && (
+                                <span className="text-blue-200/75">Cutoff: {report.cutoffLocal}</span>
+                            )}
+                            <span className="text-blue-200/75">Older legacy uploads are excluded from this production QA view.</span>
+                        </div>
                         <p className="text-xs text-gray-500 mt-1">
                             Evidence-only audit. Speculative diagram-keyword warnings are intentionally excluded.
                         </p>
@@ -1043,22 +866,10 @@ const QADashboard = () => {
 
                 {showGuide && <SituationGuideCard />}
 
-                <RepairResultCard
-                    result={repairResult}
-                    error={repairError}
-                    applying={repairApplying}
-                    onApply={applyLastRepair}
-                    onDismiss={() => {
-                        setRepairResult(null);
-                        setRepairError(null);
-                        setRepairPayload(null);
-                    }}
-                />
-
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-3 bg-gray-900 border border-gray-800 rounded-xl p-4">
                     <div>
                         <p className="text-sm font-semibold text-gray-200">Detailed evidence</p>
-                        <p className="text-xs text-gray-500">Use this only when you need exact IDs, duplicate rows, or repair buttons.</p>
+                        <p className="text-xs text-gray-500">Use this only when you need exact IDs, duplicate rows, or proof for a main-dashboard fix.</p>
                     </div>
                     <button
                         type="button"
@@ -1094,7 +905,6 @@ const QADashboard = () => {
                                 metadataConflictCount={report.metadataConflictCount ?? report.metadataConflicts?.length ?? 0}
                                 registryReferenceConflicts={report.registryReferenceConflicts ?? []}
                                 registryReferenceConflictCount={report.registryReferenceConflictCount ?? report.registryReferenceConflicts?.length ?? 0}
-                                onRepair={handleRepair}
                             />
                             <GhostDataCard
                                 unknownIDs={report.unknownIDs ?? 0}
@@ -1104,14 +914,13 @@ const QADashboard = () => {
                             <NeedsReviewCard
                                 count={report.needsReviewCount ?? 0}
                                 items={report.needsReviewItems ?? []}
-                                onRepair={handleRepair}
                             />
                         </div>
                     </>
                 )}
 
                 <p className="text-center text-gray-700 text-xs mt-10">
-                    Paperly QA Agent v4 | evidence-only DB audit | dry-run repair controls | daily midnight scan plus manual force scan
+                    Paperly QA Agent v4 | recent-upload evidence audit | reports only | daily midnight scan plus manual force scan
                 </p>
             </div>
         </div>
