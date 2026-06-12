@@ -632,14 +632,15 @@ const buildUploadIssueCards = ({ report, blockers = [], items = [] }) => {
     const normalizedId = normalizeCanonicalForUi(id);
     const hint = groupedSplitHints.get(normalizedId);
     const index = Number.isInteger(hint?.sourceIndex) ? hint.sourceIndex : findLikelyRowIndexForCanonical(items, id);
-    addIssue({
-      type: hint ? "split_grouped_row_missing" : "missing_counterpart_id",
-      severity: "High",
-      index,
-      id: normalizedId || id,
-      sourceId: hint?.sourceId,
-      sourceIndex: hint?.sourceIndex,
-      title: "QP/MS ID Missing Here",
+      addIssue({
+        type: hint ? "split_grouped_row_missing" : "missing_counterpart_id",
+        severity: "High",
+        index,
+        id: normalizedId || id,
+        sourceId: hint?.sourceId,
+        sourceIndex: hint?.sourceIndex,
+        splitConfidence: hint?.confidence,
+        title: "QP/MS ID Missing Here",
       problem: hint
         ? `${displayLabelFromCanonical(id) || id} exists in the paired document and appears grouped inside ${displayLabelFromCanonical(hint.sourceId) || hint.sourceId}.`
         : `${displayLabelFromCanonical(id) || id} exists in the paired document but not in this upload.`,
@@ -1550,11 +1551,11 @@ const Dashboard = () => {
     const sourceId = getRowCanonical(sourceRow) || issue?.sourceId || "source row";
     const missingLabel = displayLabelFromCanonical(missingId) || missingId;
     const sourceText = String(sourceRow.question_latex || "").trim();
-    const copiedText = sourceText.startsWith(missingLabel)
-      ? sourceText
-      : `${missingLabel} [SPLIT REVIEW: copied from ${sourceId}. Trim this row to only the printed ${missingLabel} subpart before saving.]\n\n${sourceText}`;
+    const highConfidence = String(issue?.splitConfidence || "").startsWith("high");
+    const copiedText = highConfidence && sourceText
+      ? `${missingLabel} [SPLIT REVIEW: copied from ${sourceId}. Trim this row to only the printed ${missingLabel} subpart before saving.]\n\n${sourceText}`
+      : `${missingLabel} [SPLIT REVIEW: type or paste only the printed ${missingLabel} subpart from the PDF. Source row: ${sourceId}.]`;
     const warnings = [
-      ...(Array.isArray(sourceRow.validation_warnings) ? sourceRow.validation_warnings : []),
       `Review repair created split row ${missingId} from grouped source row ${sourceId}. Trim copied text against the PDF before saving.`,
     ];
     const newRow = cleanMsAnchorPlaceholderRow({
@@ -1568,7 +1569,19 @@ const Dashboard = () => {
     });
 
     setExtractedQuestions((prev) => {
-      const next = [...prev, newRow].sort((a, b) => compareCanonicalIds(getRowCanonical(a), getRowCanonical(b)));
+      const cleanedPrev = prev.map((row, rowIndex) => {
+        if (rowIndex !== sourceIndex) return row;
+        const nextWarnings = (Array.isArray(row.validation_warnings) ? row.validation_warnings : []).filter((warning) => {
+          const hint = parseGroupedSplitRepairHint(warning);
+          return !hint || hint.missingId !== missingId;
+        });
+        return {
+          ...row,
+          validation_warnings: nextWarnings,
+          needs_review: nextWarnings.length > 0 ? row.needs_review : false,
+        };
+      });
+      const next = [...cleanedPrev, newRow].sort((a, b) => compareCanonicalIds(getRowCanonical(a), getRowCanonical(b)));
       const nextIndex = next.findIndex((row) => getRowCanonical(row) === missingId);
       setTimeout(() => setCurrentQuestionIndex(Math.max(0, nextIndex)), 0);
       return next;
@@ -1763,13 +1776,16 @@ const Dashboard = () => {
     setCurrentQuestionIndex(Math.min(issue.index, Math.max(0, extractedQuestions.length - 1)));
   };
 
-  const handleRescueMissingIds = async () => {
+  const handleRescueMissingIds = async (idsOverride = null) => {
     const file = originalFileRef.current;
     if (!file) {
       toast.warn("Original PDF is not available in this tab. Upload the file again to run targeted rescue.");
       return;
     }
-    if (isMarkingScheme || rescueCandidateIds.length === 0) return;
+    const idsToRescue = [
+      ...new Set((Array.isArray(idsOverride) ? idsOverride : rescueCandidateIds).map(normalizeCanonicalForUi).filter(Boolean)),
+    ];
+    if (isMarkingScheme || idsToRescue.length === 0) return;
 
     try {
       setRescuingMissing(true);
@@ -1778,13 +1794,13 @@ const Dashboard = () => {
       const expectedIds = [
         ...new Set([
           ...extractedQuestions.map(getRowCanonical).filter(Boolean),
-          ...rescueCandidateIds,
+          ...idsToRescue,
         ]),
       ].sort(compareCanonicalIds);
 
       const result = await rescueMissingQuestions({
         imageBase64: base64String,
-        missingIds: rescueCandidateIds,
+        missingIds: idsToRescue,
         metadata: {
           ...extractedMeta,
           expected_canonical_ids: expectedIds,
@@ -1798,13 +1814,13 @@ const Dashboard = () => {
       const recovered = Array.isArray(result?.questions_array) ? result.questions_array : [];
       const exactRecovered = recovered.filter((row) => {
         const id = getRowCanonical(row);
-        return id && rescueCandidateIds.includes(id) && !existingIds.has(id);
+        return id && idsToRescue.includes(id) && !existingIds.has(id);
       });
 
       if (exactRecovered.length === 0) {
         const pages = result?.rescue_report?.pages_attempted || [];
         const groupedHints = collectGroupedSplitRepairHints(extractedQuestions);
-        const groupedIds = rescueCandidateIds.filter((id) => groupedHints.has(id));
+        const groupedIds = idsToRescue.filter((id) => groupedHints.has(id));
         if (groupedIds.length > 0) {
           toast.warn(
             `Rescue recovered 0 because ${groupedIds.join(", ")} appears grouped inside existing row(s). Use Create Split Row instead.`
@@ -1875,7 +1891,7 @@ const Dashboard = () => {
         label: rescuingMissing ? "Rescuing..." : "Run Targeted Rescue",
         variant: "primary",
         disabled: loading || saving || rescuingMissing || !originalFileRef.current,
-        onClick: handleRescueMissingIds,
+        onClick: () => handleRescueMissingIds([activeUploadIssue.id]),
       });
     }
 
