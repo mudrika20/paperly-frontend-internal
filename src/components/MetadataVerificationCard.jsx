@@ -11,6 +11,15 @@ const FIELDS = [
   { key: "program",      label: "Program" },
 ];
 
+const sessionCodeFromValue = (value = "") => {
+  const s = String(value || "").trim().toLowerCase();
+  if (["m", "s", "w"].includes(s)) return s;
+  if (/(feb|february|mar|march)/i.test(s)) return "m";
+  if (/(may|jun|june|jul|july|summer)/i.test(s)) return "s";
+  if (/(oct|october|nov|november|winter)/i.test(s)) return "w";
+  return "";
+};
+
 const MetadataVerificationCard = ({
   extractedMeta,
   extractedQuestions,
@@ -29,7 +38,11 @@ const MetadataVerificationCard = ({
   if (!extractedQuestions || extractedQuestions.length === 0) return null;
 
   const handleChange = (key, value) => {
-    setLocalMeta((prev) => ({ ...prev, [key]: value }));
+    setLocalMeta((prev) => ({
+      ...prev,
+      [key]: value,
+      ...(key === "session" ? { session_code: sessionCodeFromValue(value) || prev.session_code } : {}),
+    }));
   };
 
   const busy = loading || saving;

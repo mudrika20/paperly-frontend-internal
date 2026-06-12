@@ -66,6 +66,28 @@ const normaliseQuestion = (data) => {
 
 // ---------------------------------------------------------------------------
 
+const canonicalIdToDisplayLabel = (canonicalId = "") => {
+  const parts = String(canonicalId || "")
+    .trim()
+    .toLowerCase()
+    .split(".")
+    .filter(Boolean);
+  if (!parts.length) return "";
+  const [root, ...rest] = parts;
+  return `${root}${rest.map((part) => `(${part})`).join("")}`;
+};
+
+const replaceLeadingQuestionLabel = (text = "", canonicalId = "") => {
+  const label = canonicalIdToDisplayLabel(canonicalId);
+  if (!label) return text;
+  const source = String(text || "").trimStart();
+  const leadingLabelPattern = /^\d+\s*(?:\([a-z]+\)|\([ivxlcdm]+\))*/i;
+  if (leadingLabelPattern.test(source)) {
+    return source.replace(leadingLabelPattern, label);
+  }
+  return `${label} ${source}`.trim();
+};
+
 const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = "" }) => {
   const norm = normaliseQuestion(data);
 
@@ -73,6 +95,7 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
   const [questionType,      setQuestionType]       = useState(norm.questionType);
   const [options,           setOptions]            = useState(norm.options);
   const [difficultyOverride, setDifficultyOverride] = useState(norm.difficultyOverride);
+  const [canonicalId, setCanonicalId] = useState(data?.canonical_question_id || "");
 
   const pastedSetRef = useRef(new Set());
 
@@ -99,6 +122,7 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
     setQuestionType(n.questionType);
     setOptions(n.options);
     setDifficultyOverride(n.difficultyOverride);
+    setCanonicalId(data?.canonical_question_id || "");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
@@ -120,6 +144,27 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
     const val = e.target.value === "null" ? null : e.target.value;
     setDifficultyOverride(val);
     onChange({ difficulty_override: val });
+  };
+
+  const handleCanonicalIdChange = (e) => {
+    const value = e.target.value.trim().toLowerCase();
+    const parent = value.split(".")[0] || "";
+    const nextQuestionLatex = replaceLeadingQuestionLabel(questionLatex, value);
+    setCanonicalId(value);
+    setQuestionLatex(nextQuestionLatex);
+    onChange({
+      canonical_question_id: value,
+      parent_canonical_id: parent,
+      question_id: canonicalIdToDisplayLabel(value),
+      question_latex: nextQuestionLatex,
+      needs_review: true,
+      validation_warnings: [
+        ...new Set([
+          ...(Array.isArray(data.validation_warnings) ? data.validation_warnings : []),
+          "Canonical ID manually edited during human review.",
+        ]),
+      ],
+    });
   };
 
   // ── Diagram helpers ───────────────────────────────────────────────────────
@@ -259,6 +304,21 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
         >
           📄 View PDF
         </button>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
+          Canonical ID
+        </label>
+        <input
+          value={canonicalId}
+          onChange={handleCanonicalIdChange}
+          className="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1.5 font-mono text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+          placeholder="Example: 7.c.ii"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Edit only when QA says the saved question number is wrong. Use dot format, for example 7.c.ii.
+        </p>
       </div>
 
       {/* Main content */}

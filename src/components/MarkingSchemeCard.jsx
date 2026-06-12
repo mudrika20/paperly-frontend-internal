@@ -41,7 +41,7 @@ const MethodStepsList = ({ steps = [] }) => {
 // ---------------------------------------------------------------------------
 // MSEntryRow — diagram gallery + Ctrl+V paste support
 // ---------------------------------------------------------------------------
-const MSEntryRow = ({ entry, index, onChange }) => {
+const MSEntryRow = ({ entry, index, onChange, onDelete, isHighlighted = false }) => {
   const questionLabel =
     entry.question_id ||
     entry.question_latex ||
@@ -54,6 +54,7 @@ const MSEntryRow = ({ entry, index, onChange }) => {
 
   const cognitiveDemand    = entry.cognitive_demand    || "MEDIUM";
   const difficultyOverride = entry.difficulty_override || null;
+  const canonicalId = entry.canonical_question_id || "";
 
   const pastedSetRef = useRef(new Set());
 
@@ -120,6 +121,34 @@ const MSEntryRow = ({ entry, index, onChange }) => {
     if (onChange) onChange({ ...entry, difficulty_override: val });
   };
 
+  const displayLabelFromCanonical = (value = "") => {
+    const parts = String(value || "").trim().toLowerCase().split(".").filter(Boolean);
+    if (parts.length === 0) return "";
+    return `${parts[0]}${parts.slice(1).map(part => `(${part})`).join("")}`;
+  };
+
+  const handleCanonicalIdChange = (e) => {
+    const value = e.target.value.trim().toLowerCase();
+    const parent = value.split(".")[0] || "";
+    const label = displayLabelFromCanonical(value);
+    if (onChange) {
+      onChange({
+        ...entry,
+        canonical_question_id: value,
+        parent_canonical_id: parent,
+        question_id: label || entry.question_id,
+        question_latex: label || entry.question_latex,
+        needs_review: true,
+        validation_warnings: [
+          ...new Set([
+            ...(Array.isArray(entry.validation_warnings) ? entry.validation_warnings : []),
+            "Canonical ID manually edited during human review.",
+          ]),
+        ],
+      });
+    }
+  };
+
   const addMethodStep = () => {
     if (onChange) onChange({ ...entry, method_steps: [...methodSteps, { type: "M1", description: "" }] });
   };
@@ -139,13 +168,38 @@ const MSEntryRow = ({ entry, index, onChange }) => {
 
   return (
     <tr
-      className="align-top hover:bg-amber-50 transition-colors"
+      id={`ms-entry-row-${index}`}
+      className={`align-top transition-colors ${
+        isHighlighted ? "bg-blue-50 ring-2 ring-inset ring-blue-300" : "hover:bg-slate-50"
+      }`}
       onPaste={handlePaste}
       tabIndex={0}
     >
       {/* ── Question No & Badges ─────────────────────────────────────── */}
       <td className="w-28 px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">
-        <div>{questionLabel}</div>
+        <div className="flex items-start justify-between gap-2">
+          <span>{questionLabel}</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onDelete) onDelete(index);
+            }}
+            className="rounded-md border border-red-200 bg-white p-1 text-red-600 shadow-sm hover:bg-red-50"
+            title="Delete this MS row from the current review payload"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+        <label className="mt-2 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
+          Canonical ID
+        </label>
+        <input
+          value={canonicalId}
+          onChange={handleCanonicalIdChange}
+          className="mt-1 w-full rounded border border-slate-300 bg-white px-1.5 py-1 font-mono text-xs font-semibold outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-200"
+          placeholder="7.c.ii"
+        />
         <div className="mt-3 flex flex-col gap-1.5">
           <span className={`inline-flex w-max items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${badgeColor}`}>
             AI: {cognitiveDemand}
@@ -153,7 +207,7 @@ const MSEntryRow = ({ entry, index, onChange }) => {
           <select
             value={difficultyOverride || "null"}
             onChange={handleDifficultyOverrideChange}
-            className="w-full cursor-pointer appearance-none rounded border border-amber-200 bg-amber-50 p-1 text-[10px] font-semibold text-amber-900 outline-none hover:bg-white focus:ring-1 focus:ring-amber-400"
+            className="w-full cursor-pointer appearance-none rounded border border-slate-200 bg-slate-50 p-1 text-[10px] font-semibold text-slate-700 outline-none hover:bg-white focus:ring-1 focus:ring-blue-300"
           >
             <option value="null">- No Override -</option>
             <option value="Easy">Force: Easy</option>
@@ -277,30 +331,30 @@ const MSEntryRow = ({ entry, index, onChange }) => {
 // ---------------------------------------------------------------------------
 // MarkingSchemeCard — wrapper (structure unchanged)
 // ---------------------------------------------------------------------------
-const MarkingSchemeCard = ({ markingSchemeData, allEntries = [], onEntryChange }) => {
+const MarkingSchemeCard = ({ markingSchemeData, allEntries = [], onEntryChange, onEntryDelete, highlightedIndex = null }) => {
   const entries     = allEntries.length > 0 ? allEntries : markingSchemeData ? [markingSchemeData] : [];
   const paperRefKey = entries[0]?.paper_reference_key || "";
 
   if (entries.length === 0) {
     return (
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center text-slate-500">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-slate-500 shadow-sm">
         No marking scheme entries to display.
       </div>
     );
   }
 
   return (
-    <div className="space-y-3 rounded-2xl border border-amber-200 bg-white shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between bg-amber-50 px-5 py-4 border-b border-amber-200">
+    <div className="space-y-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
         <div>
-          <h2 className="text-lg font-bold text-amber-900">📋 Marking Scheme Review</h2>
+          <h2 className="text-lg font-bold text-slate-900">📋 Marking Scheme Review</h2>
           {paperRefKey && (
-            <p className="mt-0.5 text-xs text-amber-700 font-mono">
+            <p className="mt-0.5 font-mono text-xs text-slate-500">
               paper_reference_key: <span className="font-bold">{paperRefKey}</span>
             </p>
           )}
         </div>
-        <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800">
+        <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700 ring-1 ring-blue-100">
           {entries.length} entries · Editable
         </span>
       </div>
@@ -321,7 +375,9 @@ const MarkingSchemeCard = ({ markingSchemeData, allEntries = [], onEntryChange }
                 key={`ms-${idx}`}
                 entry={entry}
                 index={idx}
+                isHighlighted={idx === highlightedIndex}
                 onChange={updatedEntry => onEntryChange && onEntryChange(idx, updatedEntry)}
+                onDelete={onEntryDelete}
               />
             ))}
           </tbody>

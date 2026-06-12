@@ -35,14 +35,6 @@ const apiClient = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-// Direct client for bypassing Node and hitting Python Engine directly
-const PYTHON_API_URL = "http://localhost:8000/api";
-const pythonApiClient = axios.create({
-  baseURL: PYTHON_API_URL,
-  timeout: REQUEST_TIMEOUT_MS,
-  headers: { "Content-Type": "application/json" },
-});
-
 class ApiPipelineError extends Error {
   constructor(message, { stage = null, status = null, details = null } = {}) {
     super(message);
@@ -61,13 +53,30 @@ const parseErrorPayload = (error) => {
 };
 
 // ── Upload image / PDF for AI extraction ──────────────────────────────────────
-export const uploadImage = async (imageBase64, metadata, mimeType = "image/png", firstPageBase64 = null) => {
+//
+// PHASE 1 — bypassCache flag:
+//   When bypassCache=true (triggered by "Redo Extraction"):
+//     • Node skips its NodeCache lookup for this document.
+//     • Node sends `bypassCache: true` in the request body.
+//     • ingestionController reads it and passes useCache=false to sendToPythonEngine.
+//     • sendToPythonEngine skips the local NodeCache AND sends use_cache=false to Python.
+//     • Python's EXTRACTION_CACHE is also bypassed for this request.
+//
+//   Default: bypassCache=false → normal cache-aware flow.
+//
+export const uploadImage = async (
+  imageBase64,
+  metadata,
+  mimeType = "image/png",
+  firstPageBase64 = null,
+  bypassCache = false,        // PHASE 1: forwarded all the way to Python engine
+) => {
   try {
-    // Add board information and first page extraction for IB documents
     const requestData = {
       imageBase64,
       mime_type: mimeType,
       metadata,
+      bypassCache,            // PHASE 1: consumed by ingestionController → pythonEngine
     };
     
     // Add the first page image if provided (for IB board extraction)
@@ -98,6 +107,40 @@ export const uploadImage = async (imageBase64, metadata, mimeType = "image/png",
 };
 
 // ── Save a verified batch to MongoDB ──────────────────────────────────────────
+export const rescueMissingQuestions = async ({
+  imageBase64,
+  missingIds = [],
+  metadata = {},
+  mimeType = "application/pdf",
+  fileName = "",
+  board = "IGCSE",
+}) => {
+  try {
+    const { data: json } = await apiClient.post("/v1/internal/rescue-missing", {
+      imageBase64,
+      missingIds,
+      mime_type: mimeType,
+      document_type: "Question Paper",
+      file_name: fileName,
+      board,
+      extra_metadata: metadata,
+    });
+    return json?.data || { questions_array: [], rescue_report: {} };
+  } catch (error) {
+    const payload = parseErrorPayload(error);
+    const message =
+      payload?.details?.error?.message ||
+      payload?.message ||
+      payload?.detail ||
+      `Server Error ${error?.response?.status || 500}: Targeted rescue failed.`;
+    throw new ApiPipelineError(message, {
+      stage: payload?.stage || payload?.details?.error?.stage || "rescue_missing",
+      status: error?.response?.status || null,
+      details: payload,
+    });
+  }
+};
+
 export const saveQuestions = async (questionsToSave) => {
   try {
       const cleanPaperNum = (val) => {
@@ -113,7 +156,6 @@ export const saveQuestions = async (questionsToSave) => {
         // Sanitize diagram_urls if present
         if (newQ.diagram_urls) {
           newQ.diagram_urls = sanitizeDiagramUrls(newQ.diagram_urls);
-          console.log("API sanitized diagram_urls:", newQ.diagram_urls);
         }
 
         // Clean root level (both cases)
@@ -138,8 +180,8 @@ export const saveQuestions = async (questionsToSave) => {
     const isTimeout =
       error?.code === "ECONNABORTED" || String(error?.message || "").includes("timeout");
     const errorMessage =
-      payload?.message ||
       payload?.error ||
+      payload?.message ||
       (isTimeout
         ? "Save request timed out. Reduce batch size and retry."
         : `Server Error ${error?.response?.status || 500}: Failed to save to MongoDB.`);
@@ -205,6 +247,23 @@ export const manualPairDocuments = async (qp_id, ms_id, ref_code_override = null
     throw new ApiPipelineError(errorMessage, {
       status: error?.response?.status || null,
       details: payload,
+    });
+  }
+};
+
+export const runQARepairAction = async (payload) => {
+  try {
+    const { data } = await apiClient.post("/v1/internal/qa-dashboard/repair", payload);
+    return data;
+  } catch (error) {
+    const payloadData = parseErrorPayload(error);
+    const errorMessage =
+      payloadData?.message ||
+      payloadData?.error ||
+      `Server Error ${error?.response?.status || 500}: Failed to run QA repair action.`;
+    throw new ApiPipelineError(errorMessage, {
+      status: error?.response?.status || null,
+      details: payloadData,
     });
   }
 };

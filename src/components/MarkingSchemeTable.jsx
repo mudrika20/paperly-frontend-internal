@@ -109,9 +109,6 @@ const DiagramGallery = ({ urls = [] }) => {
 // MarkingSchemeTable
 // ---------------------------------------------------------------------------
 const MarkingSchemeTable = ({ data = [], onSave, saving = false, disabled = false }) => {
-  // Debug: log the data being received
-  console.log("[MarkingSchemeTable] Received data:", data);
-
   return (
     <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-lg font-semibold text-slate-800">Marking Scheme Review Grid</h2>
@@ -154,12 +151,6 @@ const MarkingSchemeTable = ({ data = [], onSave, saving = false, disabled = fals
                  // Normalise to a clean flat array regardless of shape returned
                  // by the API (flat array, nested array, or absent).
                  const diagramUrls = parseDiagrams(row.diagram_urls);
-
-                console.log(`[MarkingSchemeTable] Row ${index}:`, {
-                  questionNumber,
-                  hasAnswer:   !!answerLatex,
-                  diagramCount: diagramUrls.length,
-                });
 
                 return (
                   <tr key={`ms-row-${index}`} className="align-top">
