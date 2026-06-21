@@ -1,4 +1,4 @@
-# Logs
+﻿# Logs
 logs
 *.log
 npm-debug.log*
@@ -23,3 +23,26 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Security: local secrets and environment variants
+.env.*
+!.env.example
+
+# Build/cache/runtime artifacts
+dist/
+build/
+coverage/
+.cache/
+.tmp/
+tmp/
+
+# Local handover/export artifacts
+*.bson
+*.metadata.json
+*.zip
+*.pdf
+paperly_mongo_handover_dump_*/
+
+# OS/editor noise
+Thumbs.db
+.DS_Store
+

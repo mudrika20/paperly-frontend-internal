@@ -41,7 +41,7 @@ const MethodStepsList = ({ steps = [] }) => {
 // ---------------------------------------------------------------------------
 // MSEntryRow — diagram gallery + Ctrl+V paste support
 // ---------------------------------------------------------------------------
-const MSEntryRow = ({ entry, index, onChange, onDelete, isHighlighted = false }) => {
+const MSEntryRow = ({ entry, index, onChange, onDelete, onRepair = null, repairing = false, isHighlighted = false }) => {
   const questionLabel =
     entry.question_id ||
     entry.question_latex ||
@@ -179,17 +179,33 @@ const MSEntryRow = ({ entry, index, onChange, onDelete, isHighlighted = false })
       <td className="w-28 px-4 py-3 text-sm font-semibold text-slate-800 whitespace-nowrap">
         <div className="flex items-start justify-between gap-2">
           <span>{questionLabel}</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onDelete) onDelete(index);
-            }}
-            className="rounded-md border border-red-200 bg-white p-1 text-red-600 shadow-sm hover:bg-red-50"
-            title="Delete this MS row from the current review payload"
-          >
-            <Trash2 size={13} />
-          </button>
+          <div className="flex items-center gap-1">
+            {onRepair && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRepair(index);
+                }}
+                disabled={repairing}
+                className="rounded-md border border-indigo-200 bg-indigo-50 px-1.5 py-1 text-[10px] font-semibold text-indigo-700 shadow-sm hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                title="Repair this MS row from the original PDF"
+              >
+                {repairing ? "..." : "Repair"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onDelete) onDelete(index);
+              }}
+              className="rounded-md border border-red-200 bg-white p-1 text-red-600 shadow-sm hover:bg-red-50"
+              title="Delete this MS row from the current review payload"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
         </div>
         <label className="mt-2 block text-[10px] font-bold uppercase tracking-wide text-slate-400">
           Canonical ID
@@ -331,7 +347,7 @@ const MSEntryRow = ({ entry, index, onChange, onDelete, isHighlighted = false })
 // ---------------------------------------------------------------------------
 // MarkingSchemeCard — wrapper (structure unchanged)
 // ---------------------------------------------------------------------------
-const MarkingSchemeCard = ({ markingSchemeData, allEntries = [], onEntryChange, onEntryDelete, highlightedIndex = null }) => {
+const MarkingSchemeCard = ({ markingSchemeData, allEntries = [], onEntryChange, onEntryDelete, onEntryRepair = null, repairing = false, highlightedIndex = null }) => {
   const entries     = allEntries.length > 0 ? allEntries : markingSchemeData ? [markingSchemeData] : [];
   const paperRefKey = entries[0]?.paper_reference_key || "";
 
@@ -378,6 +394,8 @@ const MarkingSchemeCard = ({ markingSchemeData, allEntries = [], onEntryChange, 
                 isHighlighted={idx === highlightedIndex}
                 onChange={updatedEntry => onEntryChange && onEntryChange(idx, updatedEntry)}
                 onDelete={onEntryDelete}
+                onRepair={onEntryRepair}
+                repairing={repairing}
               />
             ))}
           </tbody>

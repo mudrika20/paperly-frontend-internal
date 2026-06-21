@@ -88,7 +88,14 @@ const replaceLeadingQuestionLabel = (text = "", canonicalId = "") => {
   return `${label} ${source}`.trim();
 };
 
-const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = "" }) => {
+const QuestionCard = ({
+  data,
+  onChange,
+  onRepair = null,
+  repairing = false,
+  sourceImageDataUrl = "",
+  pdfBlobUrl = "",
+}) => {
   const norm = normaliseQuestion(data);
 
   const [questionLatex,     setQuestionLatex]     = useState(norm.questionLatex);
@@ -295,6 +302,17 @@ const QuestionCard = ({ data, onChange, sourceImageDataUrl = "", pdfBlobUrl = ""
             </select>
           </div>
         </div>
+
+        {onRepair && (
+          <button
+            type="button"
+            onClick={onRepair}
+            disabled={repairing}
+            className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {repairing ? "Repairing..." : "Repair Row"}
+          </button>
+        )}
 
         <button
           type="button"

@@ -6,7 +6,7 @@ import MarkingSchemeCard from "../components/MarkingSchemeCard";
 import MetadataVerificationCard from "../components/MetadataVerificationCard";
 import SessionTracker from "../components/SessionTracker";
 import ManualPairingModal from "../components/ManualPairingModal";
-import { uploadImage, saveQuestions, fetchQuestionCount, rescueMissingQuestions } from "../services/apiHandler";
+import { uploadImage, saveQuestions, fetchQuestionCount, rescueMissingQuestions, repairExtractedRow } from "../services/apiHandler";
 import { toast } from "react-toastify";
 import { Trash2 } from "lucide-react";
 
@@ -1483,6 +1483,88 @@ const Dashboard = () => {
     toast.info(`Deleted ${label}. Counts and QA checks updated.`);
   };
 
+  const handleRepairExtractedRow = async (index) => {
+    if (!Number.isInteger(index) || index < 0 || index >= extractedQuestions.length) return;
+    const row = extractedQuestions[index] || {};
+    const id = getRowCanonical(row) || `row ${index + 1}`;
+    const activeIssue = visibleUploadIssues[activeIssueIndex] || null;
+    const repairContext =
+      activeIssue && (activeIssue.index === index || normalizeCanonicalForUi(activeIssue.id) === normalizeCanonicalForUi(id))
+        ? {
+            title: activeIssue.title,
+            problem: activeIssue.problem,
+            solution: activeIssue.solution,
+            expected: activeIssue.expected,
+            type: activeIssue.type,
+            severity: activeIssue.severity,
+          }
+        : {
+            title: "Manual row repair",
+            problem: "User pressed Repair Row on this row.",
+            expected: `Repair row ${id} against the original PDF.`,
+          };
+    const previousDiagramCount = Array.isArray(row.diagram_urls) ? row.diagram_urls.length : 0;
+    const repairToastId = toast.loading(`Repairing ${id} from PDF...`);
+
+    try {
+      setLoading(true);
+      const file = originalFileRef.current;
+      const isPdf = (file?.type || "").toLowerCase() === "application/pdf";
+      const repairPdfBase64 = isPdf ? await toBase64(file) : "";
+      const result = await repairExtractedRow({
+        row,
+        rows: extractedQuestions,
+        rowIndex: index,
+        metadata: extractedMeta,
+        imageBase64: repairPdfBase64,
+        mimeType: file?.type || "application/pdf",
+        fileName: file?.name || "",
+        board: boardMode || "IGCSE",
+        repairContext,
+      });
+      const repair = result?.repair || {};
+      if (!repair.applied || !repair.proposal) {
+        toast.update(repairToastId, {
+          render: repair.reason || `No safe repair found for ${id}.`,
+          type: "warning",
+          isLoading: false,
+          autoClose: 6500,
+        });
+        return;
+      }
+
+      const proposal = cleanMsAnchorPlaceholderRow(repair.proposal);
+      setExtractedQuestions((prev) => {
+        const next = [...prev];
+        next[index] = { ...next[index], ...proposal };
+        return next;
+      });
+      const nextDiagramCount = Array.isArray(proposal.diagram_urls) ? proposal.diagram_urls.length : 0;
+      const imageNote =
+        nextDiagramCount > previousDiagramCount
+          ? " Image crop added."
+          : nextDiagramCount > 0
+            ? " Existing image kept."
+            : " No connected image was safely found.";
+      toast.update(repairToastId, {
+        render: `Applied repair for ${id}.${imageNote} Verify before saving.`,
+        type: "success",
+        isLoading: false,
+        autoClose: 6500,
+      });
+    } catch (err) {
+      console.error(err);
+      toast.update(repairToastId, {
+        render: `Row repair failed: ${err?.message || "Unknown error"}`,
+        type: "error",
+        isLoading: false,
+        autoClose: 8000,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleMergeParentStemIntoChildren = (index) => {
     if (!Number.isInteger(index) || index < 0 || index >= extractedQuestions.length) return;
     const parentRow = extractedQuestions[index] || {};
@@ -2078,6 +2160,8 @@ const Dashboard = () => {
                     highlightedIndex={highlightedMsRowIndex}
                     onEntryChange={(index, updatedEntry) => handleQuestionChange(index, updatedEntry)}
                     onEntryDelete={handleDeleteExtractedRow}
+                    onEntryRepair={handleRepairExtractedRow}
+                    repairing={loading}
                   />
                   {extractedQuestions.length > 0 && (
                     <div className="mt-6 flex flex-col items-center gap-3">
@@ -2161,6 +2245,8 @@ const Dashboard = () => {
                         key={currentQuestionIndex}
                         data={extractedQuestions[currentQuestionIndex]}
                         onChange={(updated) => handleQuestionChange(currentQuestionIndex, updated)}
+                        onRepair={() => handleRepairExtractedRow(currentQuestionIndex)}
+                        repairing={loading}
                         sourceImageDataUrl={sourceImageDataUrl}
                         pdfBlobUrl={pdfBlobUrl}
                       />

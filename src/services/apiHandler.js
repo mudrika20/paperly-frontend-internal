@@ -25,7 +25,14 @@ const sanitizeDiagramUrls = (raw) => {
     return flattened;
 };
 
-const NODE_API_URL = import.meta.env.VITE_NODE_API_URL;
+const configuredNodeApiUrl = import.meta.env.VITE_NODE_API_URL;
+const isLocalBrowser =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+const NODE_API_URL =
+  isLocalBrowser && /onrender\.com/i.test(configuredNodeApiUrl || "")
+    ? "http://localhost:5000"
+    : configuredNodeApiUrl;
 const BASE_URL = `${(NODE_API_URL || "http://localhost:5000").replace(/\/+$/, "")}/api`;
 const REQUEST_TIMEOUT_MS = 600000;
 
@@ -114,6 +121,7 @@ export const rescueMissingQuestions = async ({
   mimeType = "application/pdf",
   fileName = "",
   board = "IGCSE",
+  repairContext = null,
 }) => {
   try {
     const { data: json } = await apiClient.post("/v1/internal/rescue-missing", {
@@ -135,6 +143,45 @@ export const rescueMissingQuestions = async ({
       `Server Error ${error?.response?.status || 500}: Targeted rescue failed.`;
     throw new ApiPipelineError(message, {
       stage: payload?.stage || payload?.details?.error?.stage || "rescue_missing",
+      status: error?.response?.status || null,
+      details: payload,
+    });
+  }
+};
+
+export const repairExtractedRow = async ({
+  row = {},
+  rows = [],
+  rowIndex = null,
+  metadata = {},
+  imageBase64 = "",
+  mimeType = "application/pdf",
+  fileName = "",
+  board = "IGCSE",
+  repairContext = null,
+}) => {
+  try {
+    const { data: json } = await apiClient.post("/v1/internal/repair-row", {
+      row,
+      rows,
+      rowIndex,
+      metadata,
+      imageBase64,
+      mime_type: mimeType,
+      file_name: fileName,
+      board,
+      repair_context: repairContext,
+    });
+    return json?.data || { repair: { applied: false, reason: "No repair returned.", proposal: row } };
+  } catch (error) {
+    const payload = parseErrorPayload(error);
+    const message =
+      payload?.details?.error?.message ||
+      payload?.message ||
+      payload?.detail ||
+      `Server Error ${error?.response?.status || 500}: Row repair failed.`;
+    throw new ApiPipelineError(message, {
+      stage: payload?.stage || payload?.details?.error?.stage || "repair_row",
       status: error?.response?.status || null,
       details: payload,
     });
